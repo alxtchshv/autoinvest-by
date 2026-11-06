@@ -339,7 +339,14 @@ func TestShowcaseSortedAndComparable(t *testing.T) {
 	for i := 0; i < 50 && !e.en.Hub.HistoryReady(); i++ {
 		time.Sleep(20 * time.Millisecond)
 	}
-	items, err := e.en.Showcase(context.Background(), 2000, 1)
+	for _, years := range []float64{1, 7} {
+		checkShowcase(t, e, years)
+	}
+}
+
+func checkShowcase(t *testing.T, e *env, years float64) {
+	t.Helper()
+	items, err := e.en.Showcase(context.Background(), 2000, years)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -355,6 +362,9 @@ func TestShowcaseSortedAndComparable(t *testing.T) {
 		}
 		if it.Symbol == "USDT" {
 			t.Error("USDT duplicates strategy «Доллар»")
+		}
+		if it.InvestedKop != items[0].InvestedKop || it.From != items[0].From {
+			t.Errorf("%s: invested %d from %s, want same as %s: %d from %s", it.ID, it.InvestedKop, it.From, items[0].ID, items[0].InvestedKop, items[0].From)
 		}
 	}
 }

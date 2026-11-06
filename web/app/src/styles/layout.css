@@ -89,8 +89,8 @@ section[id] { scroll-margin-top: 72px; }
 .wrapx { max-width: 1200px; margin: 0 auto; padding: 0 24px; }
 @media (max-width: 640px) { .wrapx { padding: 0 16px; } }
 
-.hero { padding: 56px 0 72px; display: grid; grid-template-columns: 1.02fr 1fr; gap: 56px; align-items: center; }
-.hero h1 { font-size: 54px; line-height: 58px; letter-spacing: -0.035em; font-weight: 680; max-width: 12.5em; }
+.hero { padding: 48px 0 56px; display: grid; grid-template-columns: minmax(0, .82fr) minmax(0, 1.18fr); gap: 48px; align-items: center; }
+.hero h1 { font-size: 46px; line-height: 51px; letter-spacing: -0.035em; font-weight: 680; max-width: 12.5em; }
 .hero .lead { font-size: 19px; line-height: 28px; color: var(--ink-2); margin-top: 20px; max-width: 32em; }
 .hero .cta { margin-top: 32px; display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
 .hero .facts { margin-top: 36px; display: grid; grid-template-columns: repeat(3, auto); justify-content: start; gap: 28px; font-size: 14px; color: var(--muted); }

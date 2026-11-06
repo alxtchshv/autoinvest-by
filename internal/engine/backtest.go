@@ -17,6 +17,8 @@ type BacktestRequest struct {
 	Frequency   string           `json:"frequency"` // daily | weekly | monthly
 	Years       float64          `json:"years"`
 	DepositRate float64          `json:"deposit_rate"` // годовая ставка депозита в BYN для сравнения, %
+	// From — начать не раньше этой даты (витрина выравнивает все варианты на один старт). Из API не задаётся.
+	From time.Time `json:"-"`
 }
 
 type BacktestPoint struct {
@@ -68,6 +70,9 @@ func (e *Engine) Backtest(ctx context.Context, r BacktestRequest) (*BacktestResu
 	}
 	now := time.Now().UTC().Truncate(24 * time.Hour)
 	from := now.AddDate(0, -int(math.Round(r.Years*12)), 0)
+	if r.From.After(from) {
+		from = r.From.UTC().Truncate(24 * time.Hour)
+	}
 	note := ""
 	// начало истории ограничено самым молодым активом
 	for s, w := range r.Weights {
@@ -224,19 +229,34 @@ func (e *Engine) Showcase(ctx context.Context, amountKop int64, years float64) (
 		cands = append(cands, cand{ShowcaseItem{ID: a.Symbol, Kind: "asset", Name: name, Symbol: a.Symbol, Color: a.Color, Risk: a.Risk},
 			map[string]int64{a.Symbol: 10000}})
 	}
-	want := time.Now().UTC().AddDate(0, -int(math.Round(years*12)), 0)
+	want := time.Now().UTC().Truncate(24*time.Hour).AddDate(0, -int(math.Round(years*12)), 0)
+	// Общий старт для всех: если у какого-то варианта история чуть короче срока (PAX Gold торгуется с 27.02.2020),
+	// считаем всех с его первого дня — иначе у одних вложено 7 320, у других 7 000, и сравнение нечестное.
+	// Варианты, которым истории не хватает сильно (молодые монеты), не показываем вовсе.
+	start := want
+	kept := cands[:0]
+	for _, c := range cands {
+		listed := listedSince(c.weights)
+		if listed.Sub(want) > 120*24*time.Hour {
+			continue
+		}
+		if l := listed.AddDate(0, 0, 1); l.After(start) {
+			start = l
+		}
+		kept = append(kept, c)
+	}
+	cands = kept
 	var out []ShowcaseItem
 	var firstErr error
 	for _, c := range cands {
-		r, err := e.Backtest(ctx, BacktestRequest{Weights: c.weights, AmountKop: amountKop, Frequency: "weekly", Years: years, DepositRate: 9})
+		r, err := e.Backtest(ctx, BacktestRequest{Weights: c.weights, AmountKop: amountKop, Frequency: "weekly", Years: years, DepositRate: 9, From: start})
 		if err != nil {
 			if firstErr == nil {
 				firstErr = err
 			}
 			continue
 		}
-		from, _ := time.Parse("2006-01-02", r.From)
-		if from.Sub(want) > 120*24*time.Hour || r.ValueKop <= 0 || r.InvestedKop <= 0 {
+		if r.ValueKop <= 0 || r.InvestedKop <= 0 {
 			continue
 		}
 		it := c.item
@@ -271,4 +291,20 @@ func allStable(w map[string]int64) bool {
 		}
 	}
 	return len(w) > 0
+}
+
+// listedSince — дата начала торгов самого молодого актива в наборе.
+func listedSince(w map[string]int64) time.Time {
+	var t time.Time
+	for s, v := range w {
+		if v == 0 {
+			continue
+		}
+		if a, ok := market.Find(s); ok {
+			if l, err := time.Parse("2006-01-02", a.ListedSince); err == nil && l.After(t) {
+				t = l
+			}
+		}
+	}
+	return t
 }

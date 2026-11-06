@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { AreaSeries, ColorType, createChart, LineSeries, LineStyle, type UTCTimestamp } from "lightweight-charts";
 import { ArrowLeft, ArrowRight, Bell, Check, Lock, SlidersHorizontal } from "lucide-react";
@@ -29,18 +29,9 @@ function PlanMark({ id }: { id: string }) {
   const { config } = useSession();
   const s = config?.strategies.find((x) => x.id === id);
   if (!s) return <span className="plan-mark" />;
-  const R = 9, C = 2 * Math.PI * R;
-  let acc = 0;
-  return (
-    <svg className="plan-mark" viewBox="0 0 26 26" aria-hidden>
-      {Object.entries(s.weights).sort((a, b) => b[1] - a[1]).map(([a, w]) => {
-        const len = (w / 10000) * C;
-        const el = <circle key={a} cx="13" cy="13" r={R} fill="none" strokeWidth="6" stroke={config?.assets.find((x) => x.symbol === a)?.color} strokeDasharray={`${len} ${C}`} strokeDashoffset={-acc} transform="rotate(-90 13 13)" />;
-        acc += len;
-        return el;
-      })}
-    </svg>
-  );
+  const parts = Object.entries(s.weights).sort((a, b) => b[1] - a[1]);
+  const colorOf = (a: string) => config?.assets.find((x) => x.symbol === a)?.color || "#8a919e";
+  return <span className="plan-mark"><Ring parts={parts} colorOf={colorOf} size={26} r={9} width={6} gap={1.2} /></span>;
 }
 
 function ItemMark({ x }: { x: ShowItem }) {
@@ -103,42 +94,41 @@ function TimeMachine() {
   const from = cur ? new Date(cur.from).toLocaleDateString("ru-RU", { day: "numeric", month: "long", year: "numeric" }) : "";
   const plans = data?.filter((x) => x.kind === "strategy").slice(0, 3) || [];
   const assets = data?.filter((x) => x.kind === "asset").slice(0, 3) || [];
-  const maxV = Math.max(1, ...plans.map((x) => x.value_kop), ...assets.map((x) => x.value_kop));
   const row = (x: ShowItem) => (
     <button key={x.id} role="listitem" className={`tm-row ${x.id === cur?.id ? "on" : ""}`} onClick={() => setSel(x.id)}>
-      <span className="tm-name"><ItemMark x={x} /><span>{itemTitle(x)}</span></span>
-      <span className="tm-bar"><i style={{ width: (x.value_kop / maxV) * 100 + "%" }} /></span>
-      <span className="num tm-v">{roundByn(x.value_kop)}</span>
-      <span className={`num tm-p ${x.profit_pct >= 0 ? "up" : "down"}`}>{pct(x.profit_pct, { digits: 0 })}</span>
+      <ItemMark x={x} />
+      <span className="tm-name">{itemTitle(x)}</span>
+      <span className="tm-nums"><span className="num tm-v">{roundByn(x.value_kop)}</span><span className={`num tm-p ${x.profit_pct >= 0 ? "up" : "down"}`}>{pct(x.profit_pct, { digits: 0 })}</span></span>
     </button>
   );
   return (
     <div className="sheet tm">
       <div className="tm-head">
-        <div className="tm-q">Если бы вы откладывали</div>
-        <div className="row g8 wrap">
-          {AMOUNTS.map((a) => <button key={a} className="chip" aria-pressed={a === amount} onClick={() => setAmount(a)}>{kop(a).replace(",00", "")} {RUB} в неделю</button>)}
+        <span className="tm-q">Если бы вы откладывали</span>
+        <div className="tm-seg" role="group" aria-label="Сумма в неделю">
+          {AMOUNTS.map((a) => <button key={a} aria-pressed={a === amount} onClick={() => setAmount(a)}>{kop(a).replace(",00", "")} {RUB}</button>)}
         </div>
-        <div className="row g8 wrap mt8">
-          {YEARS.map((y) => <button key={y} className="chip" aria-pressed={y === years} onClick={() => setYears(y)}>{y === 3 ? "3 года" : `${y} лет`}</button>)}
+        <span className="tm-q">в неделю</span>
+        <div className="tm-seg" role="group" aria-label="Срок">
+          {YEARS.map((y) => <button key={y} aria-pressed={y === years} onClick={() => setYears(y)}>{y === 3 ? "3 года" : `${y} лет`}</button>)}
         </div>
       </div>
       {cur ? (
-        <>
-          <div className="tm-win">
+        <div className="tm-body">
+          <div className="tm-main">
             <div className="small muted row g8">{cur.id === best?.id ? "Лучший результат" : "Результат"} — <span className="row g4 ink"><ItemMark x={cur} />{itemTitle(cur)}</span></div>
             <div className="tm-value num up">{roundByn(cur.value_kop)}</div>
             <div className="small muted">вместо {roundByn(cur.invested_kop)} вложенных · <b className={cur.profit_pct >= 0 ? "up" : "down"}>{pct(cur.profit_pct, { digits: 0 })}</b></div>
+            <GrowthChart points={cur.points} />
+            <div className="tiny faint">С {from}, реальные цены и курс НБРБ, с комиссией. Пунктир — вложено. Прошлая доходность не гарантирует будущую.</div>
           </div>
-          <GrowthChart points={cur.points} />
-          <div className="tm-rank" role="list">
-            <div className="tm-group">Планы AutoInvest</div>
+          <div className="tm-side" role="list">
+            <div className="tm-group">Планы</div>
             {plans.map(row)}
-            <div className="tm-group">Отдельные активы</div>
+            <div className="tm-group">Монеты</div>
             {assets.map(row)}
           </div>
-          <div className="tiny faint tm-foot">Реальные цены с {from} и курс НБРБ, с учётом комиссии. Пунктир — сколько вложено. Прошлая доходность не гарантирует будущую.</div>
-        </>
+        </div>
       ) : (
         <div className="tm-empty muted small">{err || "Считаем по реальной истории цен…"}</div>
       )}
@@ -233,20 +223,45 @@ const PITCH: Record<string, string> = {
   max: "Только криптовалюта, включая молодые монеты. Деньги, которые не жалко.",
 };
 
-function Donut({ parts, colorOf, center }: { parts: [string, number][]; colorOf: (s: string) => string; center: ReactNode }) {
-  const R = 70, C = 2 * Math.PI * R;
-  let acc = 0;
+/** Кольцо долей. Разделители — прозрачные радиальные прорези постоянной ширины (через маску): щель в штрихе
+ *  дуги расширялась бы к внешнему краю, а прорезь одинаковая от внутреннего края до внешнего и не зависит от фона. */
+function Ring({ parts, colorOf, size, r, width, gap }: { parts: [string, number][]; colorOf: (s: string) => string; size: number; r: number; width: number; gap: number }) {
+  const id = useId();
+  const C = 2 * Math.PI * r, cx = size / 2;
+  const r0 = r - width / 2 - 1, r1 = r + width / 2 + 1;
+  let acc = 0, accBp = 0;
   return (
-    <div className="donut">
-      <svg viewBox="0 0 180 180" aria-hidden>
-        <circle cx="90" cy="90" r={R} fill="none" stroke="var(--line-2)" strokeWidth="22" />
+    <svg viewBox={`0 0 ${size} ${size}`} aria-hidden>
+      {parts.length > 1 && (
+        <mask id={id} maskUnits="userSpaceOnUse" x="0" y="0" width={size} height={size}>
+          <rect width={size} height={size} fill="#fff" />
+          {parts.map(([a, w]) => {
+            const ang = (accBp / 10000) * 2 * Math.PI - Math.PI / 2;
+            accBp += w;
+            const c = Math.cos(ang), sn = Math.sin(ang);
+            return <line key={a} x1={cx + r0 * c} y1={cx + r0 * sn} x2={cx + r1 * c} y2={cx + r1 * sn} stroke="#000" strokeWidth={gap} />;
+          })}
+        </mask>
+      )}
+      <g mask={parts.length > 1 ? `url(#${id})` : undefined}>
         {parts.map(([a, w]) => {
           const len = (w / 10000) * C;
-          const el = <circle key={a} cx="90" cy="90" r={R} fill="none" stroke={colorOf(a)} strokeWidth="22" strokeDasharray={`${Math.max(len - 3, 0)} ${C}`} strokeDashoffset={-acc} transform="rotate(-90 90 90)" />;
+          // единственная доля — полный круг без стыка
+          const el = parts.length === 1
+            ? <circle key={a} cx={cx} cy={cx} r={r} fill="none" stroke={colorOf(a)} strokeWidth={width} />
+            : <circle key={a} cx={cx} cy={cx} r={r} fill="none" stroke={colorOf(a)} strokeWidth={width} strokeDasharray={`${len} ${C}`} strokeDashoffset={-acc} transform={`rotate(-90 ${cx} ${cx})`} />;
           acc += len;
           return el;
         })}
-      </svg>
+      </g>
+    </svg>
+  );
+}
+
+function Donut({ parts, colorOf, center }: { parts: [string, number][]; colorOf: (s: string) => string; center: ReactNode }) {
+  return (
+    <div className="donut">
+      <Ring parts={parts} colorOf={colorOf} size={180} r={70} width={22} gap={3} />
       <div className="donut-c">{center}</div>
     </div>
   );
@@ -412,7 +427,7 @@ export default function Landing() {
   const facts = useMemo(() => [
     [`от 5 ${RUB}`, "минимальное пополнение"],
     ["6 активов", "доллар, золото, криптовалюты"],
-    ["в любой момент", "вывод на карту без штрафов"],
+    ["без штрафов", "вывод на карту в любой момент"],
   ], []);
 
   // переход с другой страницы по ссылке вида /#faq: прокручиваем, когда раздел отрисован

@@ -331,6 +331,25 @@ func (s *Store) AuditFor(ctx context.Context, userID int64, limit int, prefix ..
 	return out, rows.Err()
 }
 
+// AuditRange — события пользователя за период [from, to) по возрастанию времени; 0 — без границы.
+func (s *Store) AuditRange(ctx context.Context, userID, from, to int64, limit int) ([]AuditEntry, error) {
+	rows, err := s.DB.QueryContext(ctx, `SELECT action, details, ip, user_agent, created_at FROM audit_log
+		WHERE user_id=? AND (?=0 OR created_at>=?) AND (?=0 OR created_at<?) ORDER BY id DESC LIMIT ?`, userID, from, from, to, to, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []AuditEntry
+	for rows.Next() {
+		var a AuditEntry
+		if err := rows.Scan(&a.Action, &a.Details, &a.IP, &a.UserAgent, &a.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}
+
 // Версии юридических документов. При изменении текста документа версия повышается,
 // и пользователю нужно принять новую редакцию.
 const (

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { ArrowDownToLine, ArrowLeft, FlaskConical, Pause, Pencil, Play, Plus, SlidersHorizontal, Trash2 } from "lucide-react";
+import { ArrowDownToLine, ArrowLeft, FlaskConical, Pause, Pencil, Play, Plus, Settings2, SlidersHorizontal, Trash2 } from "lucide-react";
 import { api, idemKey } from "../../lib/api";
 import { byn, date, dateTime, kop, parseKop, pct, planName, price, qty, scheduleText, when } from "../../lib/format";
 import { useLoad, useSubmit, useTitle } from "../../lib/hooks";
@@ -82,7 +82,7 @@ export default function PlanDetail() {
             <div className="pd-actions">
               <Button variant="primary" icon={<Plus />} onClick={() => setModal("topup")}>Пополнить</Button>
               <Button icon={<ArrowDownToLine />} onClick={() => setModal("withdraw")} disabled={v.value_kop <= 0}>Вывести</Button>
-              <MoreMenu items={[
+              <MoreMenu text="Управление" icon={<Settings2 />} items={[
                 { label: p.status === "active" ? "Поставить на паузу" : "Включить пополнения", icon: p.status === "active" ? <Pause /> : <Play />, onClick: toggle },
                 { label: "Сумма и расписание", icon: <Pencil />, onClick: () => setModal("edit") },
                 { label: "Изменить план", icon: <SlidersHorizontal />, onClick: () => setModal("mix") },
@@ -324,7 +324,7 @@ function MixModal({ plan, open, onClose, onDone, isPro }: MP & { isPro: boolean 
     <Modal open={open} onClose={onClose} title="Состав копилки" wide>
       <div className="stack g16">
         <p className="small muted">Новый состав применится к следующим пополнениям. Уже купленные активы останутся как есть.</p>
-        <StrategyPicker strategy={strategy} allocations={allocs} isPro={isPro} onChange={(st, a) => { setStrategy(st); setAllocs(a); }} />
+        <StrategyPicker compact strategy={strategy} allocations={allocs} isPro={isPro} onChange={(st, a) => { setStrategy(st); setAllocs(a); }} />
         <div className="setting-row" style={{ borderTop: "1px solid var(--line-2)", paddingTop: 16 }}>
           <div><div style={{ fontWeight: 560 }}>Докупать при падении больше 5% за сутки</div><div className="small muted">{isPro ? "Дополнительное пополнение на обычную сумму, не чаще раза в сутки" : "Доступно в Pro"}</div></div>
           <Switch label="Докупка на просадке" checked={dip} disabled={!isPro} onChange={setDip} />

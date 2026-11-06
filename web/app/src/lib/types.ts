@@ -61,7 +61,9 @@ export type KYC = {
   user_id: number; user_email?: string; last_name: string; first_name: string; middle_name: string; birth_date: string;
   personal_number: string; doc_number: string; doc_issued_at: string; citizenship: string; address: string;
   has_doc: boolean; has_selfie: boolean; status: string; reject_reason: string; submitted_at: number; reviewed_at: number | null;
+  method: "manual" | "msi" | "msi-sandbox" | "docs" | "docs-sandbox";
 };
+export type KYCMethods = { msi: "sandbox" | "oauth" | "off"; docs: "sandbox" | "sumsub" | "manual" };
 export type Session = { id: string; created_at: number; last_seen_at: number; ip: string; user_agent: string; current: boolean };
 export type Payment = { id: number; kind: string; amount_kop: number; status: string; message: string; test: boolean; created_at: number; card_last4: string; provider_uid: string };
 

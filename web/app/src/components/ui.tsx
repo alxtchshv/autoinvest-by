@@ -1,5 +1,5 @@
 import { cloneElement, createContext, isValidElement, useCallback, useContext, useEffect, useId, useRef, useState, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode } from "react";
-import { AlertCircle, CheckCircle2, Info, MoreHorizontal, X, TriangleAlert, Car, GraduationCap, Gift, Heart, Home, Laptop, PiggyBank, Plane, Rocket, Shield } from "lucide-react";
+import { AlertCircle, CheckCircle2, ChevronDown, Info, MoreHorizontal, X, TriangleAlert, Car, GraduationCap, Gift, Heart, Home, Laptop, PiggyBank, Plane, Rocket, Shield } from "lucide-react";
 import { kop, pct, RUB } from "../lib/format";
 import { useSession } from "../lib/session";
 
@@ -64,9 +64,9 @@ export function Switch({ checked, onChange, label, disabled }: { checked: boolea
   );
 }
 
-export function Segmented<T extends string>({ value, onChange, options, label }: { value: T; onChange: (v: T) => void; options: { value: T; label: ReactNode }[]; label: string }) {
+export function Segmented<T extends string>({ value, onChange, options, label, fill }: { value: T; onChange: (v: T) => void; options: { value: T; label: ReactNode }[]; label: string; fill?: boolean }) {
   return (
-    <div className="seg" role="group" aria-label={label}>
+    <div className={`seg ${fill ? "seg-fill" : ""}`} role="group" aria-label={label}>
       {options.map((o) => (
         <button key={o.value} type="button" aria-pressed={o.value === value} onClick={() => onChange(o.value)}>
           {o.label}
@@ -105,7 +105,7 @@ export function Change({ v, k, className = "" }: { v?: number; k?: number; class
 const ICON_LABELS: Record<string, string> = { PAXG: "Au", USDT: "$", SPY: "500", BYCORP_USD: "$%", BYCORP_BYN: RUB + "%" };
 
 /** Настоящие логотипы монет (public/coins, см. README.txt там же); у остальных активов — буквенный значок. */
-const COIN_LOGOS: Record<string, string> = { BTC: "btc", ETH: "eth", SOL: "sol", USDT: "usdt", PAXG: "paxg", TON: "ton" };
+const COIN_LOGOS: Record<string, string> = { BTC: "btc", ETH: "eth", SOL: "sol", USDT: "usdt", PAXG: "paxg", TON: "ton", BYCORP_USD: "bycorp_usd", BYCORP_BYN: "bycorp_byn" };
 
 export function AssetIcon({ symbol, color, size }: { symbol: string; color?: string; size?: "sm" | "lg" }) {
   const { config } = useSession();
@@ -145,7 +145,7 @@ export const riskLabel = (r: number) => ["", "Низкий", "Умеренный
 export function Notice({ kind = "info", children, title }: { kind?: "info" | "warn" | "error" | "ok" | "plain"; children: ReactNode; title?: ReactNode }) {
   const I = kind === "warn" ? TriangleAlert : kind === "error" ? AlertCircle : kind === "ok" ? CheckCircle2 : Info;
   return (
-    <div className={`notice ${kind === "plain" ? "" : kind}`} role={kind === "error" ? "alert" : undefined}>
+    <div className={`notice notice-anim ${kind === "plain" ? "" : kind}`} role={kind === "error" ? "alert" : undefined}>
       <I />
       <div>
         {title && <div style={{ fontWeight: 600, marginBottom: 2 }}>{title}</div>}
@@ -213,10 +213,24 @@ export function PlanStatus({ s }: { s: string }) {
 
 export function Modal({ open, onClose, title, children, wide }: { open: boolean; onClose: () => void; title: ReactNode; children: ReactNode; wide?: boolean }) {
   const ref = useRef<HTMLDivElement>(null);
+  // onClose приходит новой функцией на каждой отрисовке родителя. Если держать его в зависимостях эффекта,
+  // эффект перезапускается после каждого набранного символа и снова ставит фокус в первое поле формы.
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
+  // окно закрывается плавно: после open=false ещё 180 мс держим его на экране с классом closing,
+  // а содержимое — последним открытым (иначе модалки вида open={!!item} мигнут пустыми).
+  const [mounted, setMounted] = useState(open);
+  const last = useRef<{ title: ReactNode; children: ReactNode }>({ title, children });
+  if (open) last.current = { title, children };
+  useEffect(() => {
+    if (open) { setMounted(true); return; }
+    const t = setTimeout(() => setMounted(false), 180);
+    return () => clearTimeout(t);
+  }, [open]);
   useEffect(() => {
     if (!open) return;
     const prev = document.activeElement as HTMLElement | null;
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && closeRef.current();
     document.addEventListener("keydown", onKey);
     document.body.style.overflow = "hidden";
     setTimeout(() => ref.current?.querySelector<HTMLElement>("input, select, textarea, button:not(.modal-x)")?.focus(), 30);
@@ -225,38 +239,59 @@ export function Modal({ open, onClose, title, children, wide }: { open: boolean;
       document.body.style.overflow = "";
       prev?.focus?.();
     };
-  }, [open, onClose]);
-  if (!open) return null;
+  }, [open]);
+  if (!open && !mounted) return null;
+  const view = open ? { title, children } : last.current;
   return (
-    <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className={`modal ${wide ? "wide" : ""}`} role="dialog" aria-modal="true" aria-label={typeof title === "string" ? title : undefined} ref={ref}>
+    <div className={`modal-backdrop ${open ? "" : "closing"}`} onMouseDown={(e) => open && e.target === e.currentTarget && onClose()} inert={!open}>
+      <div className={`modal ${wide ? "wide" : ""}`} role="dialog" aria-modal="true" aria-label={typeof view.title === "string" ? view.title : undefined} ref={ref}>
         <div className="modal-head">
-          <h2>{title}</h2>
+          <h2>{view.title}</h2>
           <Button variant="ghost" size="sm" className="modal-x" aria-label="Закрыть" onClick={onClose} icon={<X />} />
         </div>
-        <div className="modal-body">{children}</div>
+        <div className="modal-body">{view.children}</div>
       </div>
+    </div>
+  );
+}
+
+// Reveal — плавно показывает и прячет блок (высота + прозрачность). Пока блок уходит, показывает последнее содержимое.
+export function Reveal({ show, children }: { show: boolean; children: ReactNode }) {
+  const last = useRef<ReactNode>(children);
+  if (show) last.current = children;
+  return (
+    <div className={`reveal ${show ? "on" : ""}`} aria-hidden={!show} inert={!show}>
+      <div className="reveal-in">{show ? children : last.current}</div>
     </div>
   );
 }
 
 // ---------------------------------------------------------------- тосты
 
-type Toast = { id: number; text: string; kind: "ok" | "error" };
+type Toast = { id: number; text: string; kind: "ok" | "error"; out?: boolean };
 const TCtx = createContext<(text: string, kind?: "ok" | "error") => void>(() => {});
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [list, setList] = useState<Toast[]>([]);
   const push = useCallback((text: string, kind: "ok" | "error" = "ok") => {
     const id = Date.now() + Math.random();
-    setList((l) => [...l.slice(-2), { id, text, kind }]);
-    setTimeout(() => setList((l) => l.filter((t) => t.id !== id)), kind === "error" ? 6000 : 3500);
+    // старые тосты не исчезают рывком: сначала помечаем «уходит», через время анимации удаляем
+    const leave = (tid: number) => {
+      setList((l) => l.map((t) => (t.id === tid ? { ...t, out: true } : t)));
+      setTimeout(() => setList((l) => l.filter((t) => t.id !== tid)), 260);
+    };
+    setList((l) => {
+      const live = l.filter((t) => !t.out);
+      if (live.length >= 3) setTimeout(() => leave(live[0].id), 0);
+      return [...l, { id, text, kind }];
+    });
+    setTimeout(() => leave(id), kind === "error" ? 6000 : 3500);
   }, []);
   return (
     <TCtx.Provider value={push}>
       {children}
       <div className="toasts" aria-live="polite">
         {list.map((t) => (
-          <div key={t.id} className={`toast ${t.kind === "error" ? "error" : ""}`}>
+          <div key={t.id} className={`toast ${t.kind === "error" ? "error" : ""} ${t.out ? "out" : ""}`}>
             {t.kind === "error" ? <AlertCircle size={18} /> : <CheckCircle2 size={18} />}
             <span>{t.text}</span>
           </div>
@@ -295,7 +330,7 @@ export const useHide = () => useContext(HCtx);
 export { pct };
 
 /** Меню «⋯» для редких действий, чтобы не перегружать шапку страницы кнопками. */
-export function MoreMenu({ items, label = "Ещё действия" }: { items: { label: string; icon?: ReactNode; onClick: () => void; danger?: boolean }[]; label?: string }) {
+export function MoreMenu({ items, label = "Ещё действия", text, icon }: { items: { label: string; icon?: ReactNode; onClick: () => void; danger?: boolean }[]; label?: string; text?: string; icon?: ReactNode }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -308,7 +343,11 @@ export function MoreMenu({ items, label = "Ещё действия" }: { items: 
   }, [open]);
   return (
     <div className="more" ref={ref}>
-      <button type="button" className="btn btn-secondary more-btn" aria-label={label} title={label} aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(!open)}><MoreHorizontal /></button>
+      {text ? (
+        <button type="button" className={`btn btn-secondary more-btn-text ${open ? "is-open" : ""}`} aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(!open)}>{icon}{text}<ChevronDown className="more-caret" /></button>
+      ) : (
+        <button type="button" className="btn btn-secondary more-btn" aria-label={label} title={label} aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(!open)}><MoreHorizontal /></button>
+      )}
       <div className={`more-pop ${open ? "open" : ""}`} role="menu" inert={!open}>
         {items.map((it, i) => (
           <button key={i} type="button" role="menuitem" className={it.danger ? "danger" : ""} onClick={() => { setOpen(false); it.onClick(); }}>{it.icon}{it.label}</button>

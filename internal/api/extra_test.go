@@ -2,6 +2,9 @@ package api
 
 import (
 	"fmt"
+	"io"
+	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -232,5 +235,98 @@ func TestSandboxRunScheduleExecutesPlannedTopup(t *testing.T) {
 	s.Cfg.Broker = "whitebird"
 	if code := c.do("POST", fmt.Sprintf("/api/v1/sandbox/plans/%d/run-schedule", id), map[string]any{}, nil); code != 404 {
 		t.Fatalf("must be unavailable outside the test stand: %d", code)
+	}
+}
+
+func TestKYCViaMSISandbox(t *testing.T) {
+	srv, s := newServer(t)
+	s.Cfg.MSIMode, s.Cfg.KYCDocs = "sandbox", "sandbox"
+	c := newClient(t, srv.URL)
+	c.register("msi@test.by")
+	// ручная анкета в этом режиме закрыта
+	if code := c.do("POST", "/api/v1/kyc", map[string]any{}, nil); code != 409 {
+		t.Fatalf("анкета: %d", code)
+	}
+	var st struct{ RedirectURL string `json:"redirect_url"` }
+	c.do("POST", "/api/v1/kyc/msi/start", map[string]any{}, &st)
+	state := strings.TrimPrefix(st.RedirectURL, "/verify/msi-sandbox?state=")
+	if state == "" || state == st.RedirectURL {
+		t.Fatalf("redirect %q", st.RedirectURL)
+	}
+	if code := c.do("POST", "/api/v1/kyc/msi/sandbox", map[string]any{"state": state, "personal_number": "3010195A001PB7", "code": "12"}, nil); code != 422 && code != 400 {
+		t.Fatalf("короткий код принят: %d", code)
+	}
+	if code := c.do("POST", "/api/v1/kyc/msi/sandbox", map[string]any{"state": state, "personal_number": "3010195A001PB7", "code": "123456"}, nil); code != 200 {
+		t.Fatalf("мси: %d", code)
+	}
+	var k struct{ KYC store.KYC `json:"kyc"` }
+	c.do("GET", "/api/v1/kyc", nil, &k)
+	if k.KYC.Status != "approved" || k.KYC.Method != "msi-sandbox" || k.KYC.BirthDate != "1995-01-01" || k.KYC.LastName != "Петров" {
+		t.Fatalf("%+v", k.KYC)
+	}
+	// state одноразовый
+	if code := c.do("POST", "/api/v1/kyc/msi/sandbox", map[string]any{"state": state, "personal_number": "3010195A001PB7", "code": "123456"}, nil); code == 200 {
+		t.Fatal("повтор state принят")
+	}
+	// чужой state не подходит
+	c2 := newClient(t, srv.URL)
+	c2.register("other@test.by")
+	var st2 struct{ RedirectURL string `json:"redirect_url"` }
+	c2.do("POST", "/api/v1/kyc/msi/start", map[string]any{}, &st2)
+	if code := c.do("POST", "/api/v1/kyc/msi/sandbox", map[string]any{"state": strings.TrimPrefix(st2.RedirectURL, "/verify/msi-sandbox?state="), "personal_number": "3020195A001PB7", "code": "123456"}, nil); code == 200 {
+		t.Fatal("чужой state принят")
+	}
+}
+
+func TestSumsubWebhookRejectsBadSignature(t *testing.T) {
+	srv, s := newServer(t)
+	s.Cfg.KYCDocs, s.Cfg.SumsubHook = "sumsub", "hook"
+	req, _ := http.NewRequest("POST", srv.URL+"/api/v1/webhooks/sumsub", strings.NewReader(`{"type":"applicantReviewed","externalUserId":"ai-1","reviewResult":{"reviewAnswer":"GREEN"}}`))
+	req.Header.Set("X-Payload-Digest", "deadbeef")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != 401 {
+		t.Fatalf("без подписи: %d", resp.StatusCode)
+	}
+}
+
+func TestAuditExportAndSessionRevoke(t *testing.T) {
+	srv, _ := newServer(t)
+	c := newClient(t, srv.URL)
+	c.register("journal@test.by")
+	req, _ := http.NewRequest("GET", srv.URL+"/api/v1/me/audit/export.csv", nil)
+	resp, err := c.hc.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != 200 || !strings.Contains(string(b), "Регистрация") || !strings.Contains(resp.Header.Get("Content-Disposition"), "autoinvest-journal.csv") {
+		t.Fatalf("журнал: %d %q", resp.StatusCode, b)
+	}
+	// второй вход — второй сеанс; завершаем именно его
+	c2 := newClient(t, srv.URL)
+	if code := c2.do("POST", "/api/v1/auth/login", map[string]any{"email": "journal@test.by", "password": "parol2026"}, nil); code != 200 {
+		t.Fatalf("вход: %d", code)
+	}
+	var ss struct{ Sessions []store.Session }
+	c.do("GET", "/api/v1/me/sessions", nil, &ss)
+	var other string
+	for _, x := range ss.Sessions {
+		if !x.Current {
+			other = x.ID
+		}
+	}
+	if len(ss.Sessions) != 2 || other == "" {
+		t.Fatalf("сеансы: %+v", ss.Sessions)
+	}
+	c.do("DELETE", "/api/v1/me/sessions/"+other, nil, nil)
+	if code := c2.do("GET", "/api/v1/plans", nil, nil); code != 401 {
+		t.Fatalf("завершённый сеанс работает: %d", code)
+	}
+	if code := c.do("GET", "/api/v1/plans", nil, nil); code != 200 {
+		t.Fatalf("текущий сеанс сломался: %d", code)
 	}
 }

@@ -65,6 +65,19 @@ type Config struct {
 	AdminPassword string
 
 	RequireKYC     bool
+	KYCDocs        string // sandbox | sumsub | manual — проверка по паспорту и селфи
+	MSIMode        string // sandbox | oauth | off — вход через межбанковскую систему идентификации
+	SumsubBase     string
+	SumsubToken    string
+	SumsubSecret   string
+	SumsubHook     string // секрет вебхука (X-Payload-Digest)
+	SumsubLevel    string
+	MSIAuthURL     string
+	MSITokenURL    string
+	MSIUserURL     string
+	MSIClientID    string
+	MSISecret      string
+	MSIScope       string
 	FeeFreeBP      int64 // комиссия сервиса за покупку, базисные пункты (100 = 1%)
 	FeeProBP       int64
 	SpreadBP       int64 // спред партнёра к рыночной цене
@@ -119,6 +132,23 @@ func Load() (*Config, error) {
 		ProPlanLimit:     int(envInt64("PRO_PLAN_LIMIT", 20)),
 		SchedulerEvery:   time.Duration(envInt64("SCHEDULER_SECONDS", 30)) * time.Second,
 	}
+	c.SumsubBase = strings.TrimRight(env("SUMSUB_BASE_URL", "https://api.sumsub.com"), "/")
+	c.SumsubToken, c.SumsubSecret = env("SUMSUB_APP_TOKEN", ""), env("SUMSUB_SECRET_KEY", "")
+	c.SumsubHook, c.SumsubLevel = env("SUMSUB_WEBHOOK_SECRET", ""), env("SUMSUB_LEVEL", "basic-kyc-level")
+	c.MSIAuthURL, c.MSITokenURL, c.MSIUserURL = env("MSI_AUTH_URL", ""), env("MSI_TOKEN_URL", ""), env("MSI_USERINFO_URL", "")
+	c.MSIClientID, c.MSISecret, c.MSIScope = env("MSI_CLIENT_ID", ""), env("MSI_CLIENT_SECRET", ""), env("MSI_SCOPE", "")
+	// по умолчанию: есть ключи — боевой провайдер; нет ключей — тестовый режим при разработке и ручная проверка в продакшене
+	docs, msi := "sandbox", "sandbox"
+	if c.Env == "production" {
+		docs, msi = "manual", "off"
+	}
+	if c.SumsubToken != "" {
+		docs = "sumsub"
+	}
+	if c.MSIClientID != "" {
+		msi = "oauth"
+	}
+	c.KYCDocs, c.MSIMode = env("KYC_DOCS", docs), env("MSI_MODE", msi)
 	c.SecureCookies = strings.HasPrefix(c.PublicURL, "https://")
 	return c, c.validate()
 }
@@ -145,6 +175,27 @@ func (c *Config) validate() error {
 	// Защита от главной ошибки: брать реальные деньги и не покупать активы.
 	if c.LiveMoney() && c.Broker == BrokerPaper {
 		return errors.New("боевые платежи bePaid (BEPAID_TEST=false) нельзя включать с учебным исполнением BROKER=paper")
+	}
+	switch c.KYCDocs {
+	case "sandbox", "manual":
+	case "sumsub":
+		if c.SumsubToken == "" || c.SumsubSecret == "" || c.SumsubHook == "" {
+			return errors.New("KYC_DOCS=sumsub требует SUMSUB_APP_TOKEN, SUMSUB_SECRET_KEY и SUMSUB_WEBHOOK_SECRET")
+		}
+	default:
+		return fmt.Errorf("неизвестный KYC_DOCS=%q (sandbox|sumsub|manual)", c.KYCDocs)
+	}
+	switch c.MSIMode {
+	case "sandbox", "off":
+	case "oauth":
+		if c.MSIAuthURL == "" || c.MSITokenURL == "" || c.MSIUserURL == "" || c.MSIClientID == "" || c.MSISecret == "" {
+			return errors.New("MSI_MODE=oauth требует MSI_AUTH_URL, MSI_TOKEN_URL, MSI_USERINFO_URL, MSI_CLIENT_ID и MSI_CLIENT_SECRET")
+		}
+	default:
+		return fmt.Errorf("неизвестный MSI_MODE=%q (sandbox|oauth|off)", c.MSIMode)
+	}
+	if c.Env == "production" && (c.KYCDocs == "sandbox" || c.MSIMode == "sandbox") {
+		return errors.New("тестовая проверка личности (KYC_DOCS/MSI_MODE=sandbox) недоступна при APP_ENV=production")
 	}
 	if c.Market != MarketLive && c.Market != MarketFixture {
 		return fmt.Errorf("неизвестный MARKET=%q (live|fixture)", c.Market)

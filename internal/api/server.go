@@ -119,9 +119,16 @@ func (s *Server) routes(m *http.ServeMux) {
 	user("PATCH /api/v1/me/notifications", s.updateNotifySettings)
 	user("POST /api/v1/me/risk", s.submitRisk)
 	user("GET /api/v1/me/audit", s.audit)
+	user("GET /api/v1/me/audit/export.csv", s.exportAudit)
 	user("POST /api/v1/me/delete", s.deleteAccount)
 	user("GET /api/v1/kyc", s.getKYC)
 	user("POST /api/v1/kyc", s.submitKYC)
+	user("POST /api/v1/kyc/msi/start", s.msiStart)
+	user("GET /api/v1/kyc/msi/callback", s.msiCallback)
+	user("POST /api/v1/kyc/msi/sandbox", s.msiSandbox)
+	user("POST /api/v1/kyc/docs/start", s.docsStart)
+	user("POST /api/v1/kyc/docs/submitted", s.docsSubmitted)
+	user("POST /api/v1/kyc/docs/sandbox", s.docsSandbox)
 	user("POST /api/v1/telegram/link", s.telegramLink)
 	user("DELETE /api/v1/telegram/link", s.telegramUnlink)
 	user("GET /api/v1/referral", s.referral)
@@ -140,6 +147,7 @@ func (s *Server) routes(m *http.ServeMux) {
 	user("POST /api/v1/sandbox/plans/{id}/run-schedule", s.sandboxRunSchedule)
 	pub("GET /pay/return", s.payReturn)
 	pub("POST /api/v1/webhooks/bepaid", s.bepaidWebhook)
+	pub("POST /api/v1/webhooks/sumsub", s.sumsubWebhook)
 
 	// копилки, портфель, операции
 	user("GET /api/v1/plans", s.listPlans)
@@ -223,7 +231,7 @@ func (s *Server) securityHeaders(next http.Handler) http.Handler {
 		h.Set("X-Frame-Options", "DENY")
 		h.Set("Referrer-Policy", "strict-origin-when-cross-origin")
 		h.Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
-		h.Set("Content-Security-Policy", "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; font-src 'self' data:; frame-ancestors 'none'; form-action 'self' https://checkout.bepaid.by https://gateway.bepaid.by; base-uri 'self'")
+		h.Set("Content-Security-Policy", s.csp())
 		if s.Cfg.SecureCookies {
 			h.Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
 		}
@@ -292,6 +300,18 @@ func (s *Server) withSession(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// csp — политика источников. Виджет Sumsub (скрипт и iframe с их домена) разрешаем, только если он подключён.
+func (s *Server) csp() string {
+	script, frame, connect := "'self'", "'self'", "'self'"
+	if s.Cfg.KYCDocs == "sumsub" {
+		script += " https://static.sumsub.com"
+		frame += " https://*.sumsub.com"
+		connect += " https://*.sumsub.com"
+	}
+	return "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src " + script + "; connect-src " + connect +
+		"; frame-src " + frame + "; font-src 'self' data:; frame-ancestors 'none'; form-action 'self' https://checkout.bepaid.by https://gateway.bepaid.by; base-uri 'self'"
 }
 
 // csrf — double-submit cookie: для изменяющих запросов заголовок X-CSRF-Token должен совпасть с cookie.

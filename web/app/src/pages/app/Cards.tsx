@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { CreditCard, Lock, Plus } from "lucide-react";
 import { api } from "../../lib/api";
@@ -7,7 +7,7 @@ import { useLoad, useSubmit, useTitle } from "../../lib/hooks";
 import { useSession } from "../../lib/session";
 import type { Card } from "../../lib/types";
 import { findBank, type Bank } from "../../lib/banks";
-import { Button, Empty, LoadError, Modal, Notice, PageLoader, useToast } from "../../components/ui";
+import { Button, Empty, LoadError, Modal, Notice, PageLoader, Reveal, useToast } from "../../components/ui";
 
 function BankLogo({ bank, issuer }: { bank: Bank | null; issuer: string }) {
   const [img, setImg] = useState(true);
@@ -31,6 +31,28 @@ export function BankCard({ c }: { c: Card }) {
       </div>
     </div>
   );
+}
+
+// useFlip — плавная перестановка: запоминает, где карточки стояли, и после новой отрисовки
+// «доезжает» каждую из старого места в новое (техника FLIP), а не перескакивает.
+function useFlip(order: string) {
+  const box = useRef<HTMLDivElement>(null);
+  const prev = useRef(new Map<string, DOMRect>());
+  useLayoutEffect(() => {
+    const el = box.current;
+    if (!el) return;
+    const next = new Map<string, DOMRect>();
+    el.querySelectorAll<HTMLElement>("[data-flip]").forEach((n) => {
+      const r = n.getBoundingClientRect();
+      next.set(n.dataset.flip!, r);
+      const was = prev.current.get(n.dataset.flip!);
+      if (was && (was.left !== r.left || was.top !== r.top) && !matchMedia("(prefers-reduced-motion: reduce)").matches) {
+        n.animate([{ transform: `translate(${was.left - r.left}px, ${was.top - r.top}px)` }, { transform: "none" }], { duration: 420, easing: "cubic-bezier(.2, .8, .2, 1)" });
+      }
+    });
+    prev.current = next;
+  }, [order]);
+  return box;
 }
 
 export function useBindCard() {
@@ -58,6 +80,23 @@ export default function Cards() {
   const [bindErr, setBindErr] = useState("");
   const [del, setDel] = useState<Card | null>(null);
   const delS = useSubmit();
+  // основная карта меняется сразу на экране (и встаёт первой), запрос идёт следом; при ошибке — откат
+  const [defId, setDefId] = useState<number | null>(null);
+  const list = data?.cards || [];
+  const curDef = defId ?? list.find((c) => c.is_default)?.id ?? null;
+  const cards = [...list].sort((a, b) => Number(b.id === curDef) - Number(a.id === curDef) || a.id - b.id);
+  const grid = useFlip(cards.map((c) => c.id).join(","));
+  const makeDefault = async (c: Card) => {
+    setDefId(c.id);
+    try {
+      await api.post(`/cards/${c.id}/default`);
+      toast("Основная карта изменена");
+      reload();
+    } catch (e: any) {
+      setDefId(null);
+      toast(e.message, "error");
+    }
+  };
 
   // возврат со страницы оплаты: опрашиваем статус привязки.
   // Эффект зависит только от номера привязки: перезагрузка профиля не должна запускать второй опрос и второй тост.
@@ -85,15 +124,14 @@ export default function Cards() {
 
   if (loading && !data) return <PageLoader />;
   if (error) return <LoadError error={error} retry={reload} />;
-  const cards = data!.cards;
   return (
     <div className="stack g16">
       <div className="page-head" style={{ marginBottom: 4 }}>
         <div><h1>Карты</h1><p>С них пополняются копилки и на них выводятся деньги</p></div>
         <Button variant="primary" icon={<Plus />} busy={bind.busy} onClick={bind.start} disabled={cards.length >= 5}>Привязать карту</Button>
       </div>
-      {binding === "wait" && <Notice kind="info">Проверяем привязку карты…</Notice>}
-      {binding === "failed" && <Notice kind="error" title="Карта не привязана">{bindErr || "Банк отклонил операцию"}. Попробуйте ещё раз или другую карту.</Notice>}
+      <Reveal show={binding === "wait"}><Notice kind="info">Проверяем привязку карты…</Notice></Reveal>
+      <Reveal show={binding === "failed"}><Notice kind="error" title="Карта не привязана">{bindErr || "Банк отклонил операцию"}. Попробуйте ещё раз или другую карту.</Notice></Reveal>
       {cards.length === 0 ? (
         <div className="sheet">
           <Empty icon={<CreditCard className="ico" />} title="Карт пока нет" action={<Button variant="primary" busy={bind.busy} onClick={bind.start}>Привязать карту</Button>}>
@@ -101,13 +139,13 @@ export default function Cards() {
           </Empty>
         </div>
       ) : (
-        <div className="cards-grid">
+        <div className="cards-grid" ref={grid}>
           {cards.map((c) => (
-            <div key={c.id} className="stack g12">
+            <div key={c.id} data-flip={c.id} className={`card-slot stack g12 ${c.id === curDef ? "is-default" : ""}`}>
               <BankCard c={c} />
-              <div className="row g8 wrap">
-                {c.is_default ? <span className="badge badge-brand">Основная</span> : (
-                  <Button size="sm" onClick={async () => { await api.post(`/cards/${c.id}/default`); reload(); toast("Основная карта изменена"); }}>Сделать основной</Button>
+              <div className="row g8 wrap card-actions">
+                {c.id === curDef ? <span key="def" className="badge badge-brand pop-in">Основная</span> : (
+                  <Button key="mk" size="sm" className="pop-in" onClick={() => makeDefault(c)}>Сделать основной</Button>
                 )}
                 <Button size="sm" variant="ghost" onClick={() => setDel(c)}>Удалить</Button>
               </div>

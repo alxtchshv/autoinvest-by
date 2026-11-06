@@ -1,6 +1,7 @@
 // Готовые планы: кольцо состава, значок и плитка выбора — одинаковые на сайте, в анкете и при создании копилки.
-import { useId, type ReactNode } from "react";
-import { Check } from "lucide-react";
+import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
+import { Check, CircleAlert } from "lucide-react";
 import { planName } from "../lib/format";
 import { useSession } from "../lib/session";
 import type { Strategy } from "../lib/types";
@@ -14,7 +15,6 @@ export const PITCH: Record<string, string> = {
   growth: "Ставка на криптовалюты: растёт сильнее, но и падает глубже.",
   crypto: "Три крупные криптовалюты для тех, кто готов ждать от трёх лет.",
   max: "Только криптовалюта, включая молодые монеты. Деньги, которые не жалко.",
-  belarus: "Токены белорусских компаний с фиксированной доходностью в рублях и долларах.",
 };
 
 /** Подпись риска для плана (1–5) — одна и та же везде. */
@@ -82,5 +82,78 @@ export function PlanTile({ s, selected, onSelect, extra }: { s: Strategy; select
       </span>
       <span className="pt-check" aria-hidden>{selected && <Check />}</span>
     </button>
+  );
+}
+
+/** Подробности плана во всплывающей карточке: открывается при наведении на значок (на телефоне — по нажатию).
+ *  Рисуется в body с position: fixed, чтобы её не обрезало модальное окно с прокруткой. */
+export function PlanHint({ s }: { s: Strategy }) {
+  const { config } = useSession();
+  const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState<{ left: number; top: number; above: boolean } | null>(null);
+  const btn = useRef<HTMLSpanElement>(null);
+  const pop = useRef<HTMLDivElement>(null);
+  const hideT = useRef<number | undefined>(undefined);
+  const show = () => { window.clearTimeout(hideT.current); setOpen(true); };
+  const hide = () => { hideT.current = window.setTimeout(() => setOpen(false), 120); };
+  useLayoutEffect(() => {
+    if (!open || !btn.current) return;
+    const place = () => {
+      const r = btn.current!.getBoundingClientRect();
+      const w = 300, h = pop.current?.offsetHeight || 220;
+      const above = r.bottom + 10 + h > window.innerHeight && r.top - 10 - h > 0;
+      const left = Math.max(12, Math.min(window.innerWidth - w - 12, r.right - w + 14));
+      setPos({ left, top: above ? r.top - 10 - h : r.bottom + 10, above });
+    };
+    place();
+    window.addEventListener("scroll", place, true);
+    window.addEventListener("resize", place);
+    return () => { window.removeEventListener("scroll", place, true); window.removeEventListener("resize", place); };
+  }, [open]);
+  useEffect(() => {
+    if (!open) return;
+    const away = (e: Event) => !btn.current?.contains(e.target as Node) && !pop.current?.contains(e.target as Node) && setOpen(false);
+    const esc = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
+    document.addEventListener("pointerdown", away);
+    document.addEventListener("keydown", esc);
+    return () => { document.removeEventListener("pointerdown", away); document.removeEventListener("keydown", esc); };
+  }, [open]);
+  const parts = Object.entries(s.weights).sort((a, b) => b[1] - a[1]);
+  const nameOf = (a: string) => config?.assets.find((x) => x.symbol === a)?.name || a;
+  return (
+    <>
+      <span ref={btn} className={`pt-hint ${open ? "on" : ""}`} role="button" tabIndex={0} aria-label={`Подробнее о плане «${s.name}»`} aria-expanded={open}
+        onMouseEnter={show} onMouseLeave={hide} onFocus={show} onBlur={hide}
+        onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); }}
+        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); e.stopPropagation(); setOpen((o) => !o); } }}>
+        <CircleAlert />
+      </span>
+      {open && createPortal(
+        <div ref={pop} className={`plan-pop ${pos ? "in" : ""} ${pos?.above ? "above" : ""}`} role="tooltip" style={{ left: pos?.left ?? -9999, top: pos?.top ?? 0 }} onMouseEnter={show} onMouseLeave={hide}>
+          <div className="pp-head"><PlanMark id={s.id} size={36} /><div><b>{planName(s.name)}</b><span className={`pt-risk r${s.risk}`}>{RISK_TEXT[s.risk]}</span></div></div>
+          <p>{s.description}</p>
+          <ul className="pp-mix">
+            {parts.map(([a, w]) => <li key={a}><AssetIcon symbol={a} size="sm" /><span>{nameOf(a)}</span><b>{w / 100}%</b></li>)}
+          </ul>
+        </div>,
+        document.body,
+      )}
+    </>
+  );
+}
+
+/** Компактная плитка плана: только название и риск, подробности — в подсказке. Для смены плана в копилке. */
+export function PlanChip({ s, selected, onSelect }: { s: Strategy; selected?: boolean; onSelect?: () => void }) {
+  return (
+    <div className={`plan-chip ${selected ? "on" : ""}`}>
+      <button type="button" className="pc-main" aria-pressed={selected} onClick={onSelect}>
+        <span className="pc-radio" aria-hidden>{selected && <Check />}</span>
+        <span className="pc-text">
+          <span className="pc-name">{s.name}</span>
+          <span className={`pt-risk r${s.risk}`}>{RISK_TEXT[s.risk]}</span>
+        </span>
+      </button>
+      <PlanHint s={s} />
+    </div>
   );
 }

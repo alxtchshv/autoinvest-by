@@ -363,7 +363,7 @@ export default function Landing() {
   const ctaTo = me?.user ? "/app/plans/new" : "/register";
   const facts = useMemo(() => [
     [`от 5 ${RUB}`, "минимальное пополнение"],
-    ["7 планов", "доллар, золото, крипта, токены РБ"],
+    ["6 планов", "доллар, золото, крипта"],
     ["без штрафов", "вывод на карту в любой момент"],
   ], []);
 
@@ -403,7 +403,7 @@ export default function Landing() {
       <section className="section" id="strategies">
         <div className="wrapx">
           <h2 className="big">Выберите план</h2>
-          <p className="sub">Семь готовых планов — от спокойного до смелого, включая токены белорусских компаний. Или соберите свой.</p>
+          <p className="sub">Шесть готовых планов — от спокойного до смелого. Или соберите свой, в том числе с токенами белорусских компаний.</p>
           <StrategyDeck strategies={strategies} />
         </div>
       </section>
@@ -419,7 +419,7 @@ export default function Landing() {
               <div className="small muted">навсегда</div>
               <ul>
                 <li><Check />До {config?.free_plan_limit ?? 3} копилок</li>
-                <li><Check />Семь готовых планов</li>
+                <li><Check />Шесть готовых планов</li>
                 <li><Check />Токены компаний Беларуси</li>
                 <li><Check />Комиссия {feeFree} с пополнения</li>
                 <li><Check />Уведомления в Telegram</li>

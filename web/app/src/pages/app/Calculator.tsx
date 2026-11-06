@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { TrendingUp } from "lucide-react";
 import { Link } from "react-router-dom";
 import { api } from "../../lib/api";
@@ -11,21 +11,43 @@ import { CompareChart } from "../../components/charts";
 
 const YEARS = [1, 2, 3, 5, 7];
 
-type Params = { pick: string; k: number; freq: "daily" | "weekly" | "monthly"; years: number; dep: number | null };
+type Freq = "daily" | "weekly" | "monthly";
+type Saved = { pick: string; amount: string; freq: Freq; years: number; withDep: boolean; dep: string; started: boolean; res: BacktestResult | null; dep_used: number | null };
+
+// Расчёт живёт дольше страницы: ушли в другой раздел и вернулись — видите те же параметры и результат.
+// Храним в памяти модуля и в sessionStorage (переживает перезагрузку вкладки, но не браузера).
+const KEY = "ai_calc";
+let memo: Saved | null = null;
+function loadSaved(): Saved {
+  if (memo) return memo;
+  try {
+    const raw = sessionStorage.getItem(KEY);
+    if (raw) return (memo = JSON.parse(raw));
+  } catch { /* приватный режим — начнём с нуля */ }
+  return { pick: "balanced", amount: "20", freq: "weekly", years: 3, withDep: false, dep: "9", started: false, res: null, dep_used: null };
+}
+function save(v: Saved) {
+  memo = v;
+  try { sessionStorage.setItem(KEY, JSON.stringify(v)); } catch { /* */ }
+}
 
 export default function Calculator({ publicPage }: { publicPage?: boolean }) {
   useTitle("Калькулятор");
   const { config, me } = useSession();
-  const [pick, setPick] = useState("balanced");
-  const [amount, setAmount] = useState("20");
-  const [freq, setFreq] = useState<Params["freq"]>("weekly");
-  const [years, setYears] = useState(3);
-  const [withDep, setWithDep] = useState(false);
-  const [dep, setDep] = useState("9");
-  const [res, setRes] = useState<BacktestResult | null>(null);
-  const [done, setDone] = useState<Params | null>(null);
+  const init = useMemo(loadSaved, []);
+  const [pick, setPick] = useState(init.pick);
+  const [amount, setAmount] = useState(init.amount);
+  const [freq, setFreq] = useState<Freq>(init.freq);
+  const [years, setYears] = useState(init.years);
+  const [withDep, setWithDep] = useState(init.withDep);
+  const [dep, setDep] = useState(init.dep);
+  // started — пользователь хоть раз нажал «Рассчитать»; дальше пересчитываем сами при каждом изменении
+  const [started, setStarted] = useState(init.started);
+  const [res, setRes] = useState<BacktestResult | null>(init.res);
+  const [depUsed, setDepUsed] = useState<number | null>(init.dep_used);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const reqNo = useRef(0);
   const options = useMemo(() => {
     if (!config) return [];
     return [
@@ -38,22 +60,36 @@ export default function Calculator({ publicPage }: { publicPage?: boolean }) {
   const depRate = Number(dep.replace(",", "."));
   const amountErr = !isFinite(k) || k < 100 ? "От 1 ⃅" : k > 10_000_000 ? "Не больше 100 000 ⃅" : null;
   const depErr = withDep && (!isFinite(depRate) || depRate <= 0 || depRate > 30) ? "От 0,1 до 30%" : null;
-  const params: Params = { pick, k, freq, years, dep: withDep ? depRate : null };
-  const stale = !!done && JSON.stringify(done) !== JSON.stringify(params);
 
   const run = async () => {
     if (!opt || amountErr || depErr) return;
+    const no = ++reqNo.current;
     setBusy(true);
     setErr(null);
     try {
-      setRes(await api.post<BacktestResult>("/calculator/backtest", { weights: opt.weights, amount_kop: k, frequency: freq, years, deposit_rate: withDep ? depRate : 9 }));
-      setDone(params);
+      const r = await api.post<BacktestResult>("/calculator/backtest", { weights: opt.weights, amount_kop: k, frequency: freq, years, deposit_rate: withDep ? depRate : 9 });
+      if (no !== reqNo.current) return; // пришёл ответ на устаревшие параметры
+      setRes(r);
+      setDepUsed(withDep ? depRate : null);
+      setStarted(true);
     } catch (e: any) {
-      setErr(e.message);
+      if (no === reqNo.current) setErr(e.message);
     } finally {
-      setBusy(false);
+      if (no === reqNo.current) setBusy(false);
     }
   };
+
+  // после первого расчёта — живой пересчёт с небольшой задержкой, чтобы не дёргать сервер на каждую цифру
+  useEffect(() => {
+    if (!started) return;
+    const t = setTimeout(run, 350);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pick, k, freq, years, withDep, depRate, opt]);
+
+  useEffect(() => {
+    save({ pick, amount, freq, years, withDep, dep, started, res, dep_used: depUsed });
+  }, [pick, amount, freq, years, withDep, dep, started, res, depUsed]);
 
   const series = useMemo(() => res ? [
     { name: "Копилка", color: "#2340d8", data: res.points.map((p) => ({ t: p.t, v: p.value_kop })) },
@@ -96,7 +132,7 @@ export default function Calculator({ publicPage }: { publicPage?: boolean }) {
               </Field>
             )}
           </div>
-          <Button variant="primary" size="lg" block busy={busy} disabled={!!amountErr || !!depErr || !opt} onClick={run}>{res && !stale ? "Пересчитать" : "Рассчитать"}</Button>
+          {!started && <Button variant="primary" size="lg" block busy={busy} disabled={!!amountErr || !!depErr || !opt} onClick={run}>Рассчитать</Button>}
         </section>
         <section className="sheet">
           <div className="sheet-body stack g16">
@@ -109,12 +145,15 @@ export default function Calculator({ publicPage }: { publicPage?: boolean }) {
               </div>
             )}
             {res && (
-              <div className={`stack g16 ${stale ? "calc-stale" : ""}`}>
-                {stale && <div className="small muted">Параметры изменились — нажмите «Пересчитать».</div>}
+              <div className="stack g16">
                 {res.note && <Notice kind="info">{res.note}</Notice>}
-                <div className="calc-result">
+                <div className={`calc-result ${depUsed != null ? "three" : ""}`}>
+                  {busy && <span className="calc-busy spinner" aria-label="Пересчитываем" />}
                   <div><div className="muted">Вложили бы</div><div className="money-lg num">{byn(res.invested_kop)}</div><div className="small muted">{res.purchases} {plural(res.purchases, "пополнение", "пополнения", "пополнений")} с {dateNum(new Date(res.from).getTime() / 1000)}</div></div>
                   <div><div className="muted">Было бы сейчас</div><div className={`money-lg num ${profit >= 0 ? "up" : "down"}`}>{byn(res.value_kop)}</div><div className={`small ${profit >= 0 ? "up" : "down"}`}>{kop(profit, { sign: true })} ⃅ · {pct(res.profit_pct)}</div></div>
+                  {depUsed != null && (
+                    <div className="calc-dep-res"><div className="muted">На депозите под {String(depUsed).replace(".", ",")}%</div><div className="money-lg num">{byn(res.deposit_kop)}</div><div className="small muted">{res.value_kop >= res.deposit_kop ? <>копилка лучше на {byn(res.value_kop - res.deposit_kop)}</> : <>депозит лучше на {byn(res.deposit_kop - res.value_kop)}</>}</div></div>
+                  )}
                 </div>
                 <div>
                   <div className="row g16 wrap small" style={{ marginBottom: 8 }}>
@@ -122,9 +161,6 @@ export default function Calculator({ publicPage }: { publicPage?: boolean }) {
                   </div>
                   <CompareChart series={series} />
                 </div>
-                {done?.dep != null && (
-                  <div className="notice">На депозите под {String(done.dep).replace(".", ",")}% годовых те же пополнения дали бы <b>{byn(res.deposit_kop)}</b>.</div>
-                )}
                 <div className="row between wrap g12">
                   <span className="small muted">Прошлая доходность не гарантирует будущую. {res.rates_history ? "" : "История курса НБРБ недоступна — использован текущий курс."}</span>
                   <Link to={startTo} className="btn btn-primary">{publicPage && !me?.user ? "Начать копить" : "Создать такую копилку"}</Link>

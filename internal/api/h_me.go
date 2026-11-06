@@ -1,13 +1,11 @@
 package api
 
 import (
+	"encoding/csv"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
-	"os"
-	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -245,6 +243,55 @@ func maxRisk(profile string) int {
 	return 5
 }
 
+// auditLabels — названия событий журнала по-русски (то же, что видит пользователь в кабинете).
+var auditLabels = map[string]string{
+	"auth.login": "Вход", "auth.login_failed": "Неудачная попытка входа", "auth.register": "Регистрация", "auth.logout": "Выход",
+	"auth.password_reset": "Восстановление пароля", "auth.email_verified": "Подтверждена почта", "auth.recovery_code_used": "Использован код восстановления",
+	"security.password_changed": "Смена пароля", "security.2fa_enabled": "Включена двухфакторная защита", "security.2fa_disabled": "Отключена двухфакторная защита",
+	"security.sessions_revoked": "Завершены другие сеансы", "security.session_revoked": "Завершён сеанс", "security.sessions_revoked_all": "Выход на всех устройствах",
+	"security.audit_export": "Выгружен журнал действий",
+	"card.added": "Привязана карта", "card.removed": "Удалена карта", "card.default": "Изменена основная карта",
+	"plan.created": "Создана копилка", "plan.updated": "Изменена копилка", "plan.paused": "Копилка на паузе", "plan.resumed": "Копилка включена",
+	"plan.withdraw": "Вывод", "plan.closed": "Закрыта копилка",
+	"kyc.submitted": "Отправлены документы", "kyc.review": "Проверка документов", "kyc.msi": "Идентификация через МСИ", "kyc.provider": "Проверка личности",
+	"telegram.link": "Подключён Telegram", "telegram.unlink": "Отключён Telegram",
+	"statement.export": "Выгружена выписка", "privacy.data_export": "Выгружены персональные данные",
+	"profile.onboarding": "Подобран план", "profile.risk": "Пройдена анкета", "billing.pro": "Оплачен Pro",
+}
+
+// exportAudit — журнал действий файлом по запросу пользователя (CSV для Excel), за период или за всё время.
+func (s *Server) exportAudit(w http.ResponseWriter, r *http.Request) {
+	u := currentUser(r)
+	from, to, ok := periodFromQuery(w, r)
+	if !ok {
+		return
+	}
+	list, err := s.St.AuditRange(r.Context(), u.ID, from, to, 10000)
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	s.St.Audit(r.Context(), u.ID, u.ID, "security.audit_export", "", clientIP(r))
+	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+	w.Header().Set("Content-Disposition", `attachment; filename="autoinvest-journal.csv"`)
+	w.Write([]byte("\xEF\xBB\xBF")) // BOM, чтобы Excel открыл кириллицу
+	cw := csv.NewWriter(w)
+	cw.Comma = ';'
+	cw.Write([]string{"Дата и время (Минск)", "Событие", "Подробности", "IP-адрес", "Устройство"})
+	for _, e := range list {
+		label := auditLabels[e.Action]
+		if label == "" {
+			label = e.Action
+		}
+		ua := ""
+		if e.UserAgent != "" {
+			ua = shortUA(e.UserAgent)
+		}
+		cw.Write([]string{time.Unix(e.CreatedAt, 0).In(engine.Minsk).Format("02.01.2006 15:04:05"), label, csvSafe(e.Details), e.IP, ua})
+	}
+	cw.Flush()
+}
+
 func (s *Server) audit(w http.ResponseWriter, r *http.Request) {
 	list, err := s.St.AuditFor(r.Context(), currentUser(r).ID, 50)
 	if err != nil {
@@ -299,22 +346,30 @@ var (
 )
 
 func (s *Server) getKYC(w http.ResponseWriter, r *http.Request) {
+	methods := map[string]string{"msi": s.Cfg.MSIMode, "docs": s.Cfg.KYCDocs}
 	k, err := s.St.KYC(r.Context(), currentUser(r).ID)
 	if errors.Is(err, store.ErrNotFound) {
-		writeJSON(w, 200, map[string]any{"kyc": nil})
+		writeJSON(w, 200, map[string]any{"kyc": nil, "methods": methods})
 		return
 	}
 	if err != nil {
 		s.internal(w, r, err)
 		return
 	}
-	writeJSON(w, 200, map[string]any{"kyc": k})
+	if strings.HasPrefix(k.PersonalNumber, "pending-") {
+		k.PersonalNumber = ""
+	}
+	writeJSON(w, 200, map[string]any{"kyc": k, "methods": methods})
 }
 
 func (s *Server) submitKYC(w http.ResponseWriter, r *http.Request) {
 	u := currentUser(r)
 	if u.KYCStatus == "approved" {
 		writeErr(w, http.StatusConflict, "Личность уже подтверждена")
+		return
+	}
+	if s.Cfg.KYCDocs != "manual" {
+		writeErr(w, http.StatusConflict, "Подтвердите личность через банк (МСИ) или по паспорту и селфи")
 		return
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, 20<<20)
@@ -353,36 +408,7 @@ func (s *Server) submitKYC(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	existing, _ := s.St.KYC(r.Context(), u.ID)
-	dir := filepath.Join(s.Cfg.DataDir, "kyc")
-	os.MkdirAll(dir, 0o700)
-	save := func(field string) (string, error) {
-		f, hdr, err := r.FormFile(field)
-		if err != nil {
-			return "", nil
-		}
-		defer f.Close()
-		if hdr.Size > 8<<20 {
-			return "", errors.New("Файл больше 8 МБ")
-		}
-		head := make([]byte, 512)
-		n, _ := io.ReadFull(f, head)
-		ct := http.DetectContentType(head[:n])
-		ext := map[string]string{"image/jpeg": ".jpg", "image/png": ".png", "application/pdf": ".pdf", "image/webp": ".webp"}[ct]
-		if ext == "" {
-			return "", errors.New("Загрузите фото (JPG, PNG) или PDF")
-		}
-		name := fmt.Sprintf("%d_%s_%s%s", u.ID, field, strings.ToLower(auth.RandomCode(12, "")), ext)
-		out, err := os.OpenFile(filepath.Join(dir, name), os.O_CREATE|os.O_WRONLY|os.O_EXCL, 0o600)
-		if err != nil {
-			return "", err
-		}
-		defer out.Close()
-		out.Write(head[:n])
-		if _, err := io.Copy(out, f); err != nil {
-			return "", err
-		}
-		return name, nil
-	}
+	save := func(field string) (string, error) { return s.saveKYCFile(r, u.ID, field) }
 	if k.DocFile, err = save("doc_file"); err != nil {
 		writeFieldErr(w, "doc_file", err.Error())
 		return

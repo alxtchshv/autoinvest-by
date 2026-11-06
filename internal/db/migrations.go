@@ -282,4 +282,9 @@ CREATE INDEX consents_user ON consents(user_id, kind);
 ALTER TABLE cards ADD COLUMN bin TEXT NOT NULL DEFAULT '';
 ALTER TABLE users ADD COLUMN onboarded_at INTEGER;
 `,
+	// v-next: внешняя проверка личности (МСИ, Sumsub): каким способом и под каким номером у провайдера
+	`
+ALTER TABLE kyc ADD COLUMN method TEXT NOT NULL DEFAULT 'manual';
+ALTER TABLE kyc ADD COLUMN provider_ref TEXT NOT NULL DEFAULT '';
+`,
 }

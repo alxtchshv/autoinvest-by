@@ -1,6 +1,7 @@
 package store
 
 import (
+	"fmt"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -221,16 +222,18 @@ type KYC struct {
 	RejectReason   string `json:"reject_reason"`
 	SubmittedAt    int64  `json:"submitted_at"`
 	ReviewedAt     *int64 `json:"reviewed_at"`
+	Method         string `json:"method"` // manual | msi | docs (Sumsub) | msi-sandbox | docs-sandbox
+	ProviderRef    string `json:"-"`
 }
 
 const kycSelect = `SELECT k.user_id, u.email, k.last_name, k.first_name, k.middle_name, k.birth_date, k.personal_number, k.doc_number, k.doc_issued_at,
-	k.citizenship, k.address, k.doc_file, k.selfie_file, k.status, k.reject_reason, k.submitted_at, k.reviewed_at FROM kyc k JOIN users u ON u.id=k.user_id`
+	k.citizenship, k.address, k.doc_file, k.selfie_file, k.status, k.reject_reason, k.submitted_at, k.reviewed_at, k.method, k.provider_ref FROM kyc k JOIN users u ON u.id=k.user_id`
 
 func scanKYC(r scanner) (*KYC, error) {
 	var k KYC
 	var rev sql.NullInt64
 	err := r.Scan(&k.UserID, &k.UserEmail, &k.LastName, &k.FirstName, &k.MiddleName, &k.BirthDate, &k.PersonalNumber, &k.DocNumber, &k.DocIssuedAt,
-		&k.Citizenship, &k.Address, &k.DocFile, &k.SelfieFile, &k.Status, &k.RejectReason, &k.SubmittedAt, &rev)
+		&k.Citizenship, &k.Address, &k.DocFile, &k.SelfieFile, &k.Status, &k.RejectReason, &k.SubmittedAt, &rev, &k.Method, &k.ProviderRef)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -279,6 +282,54 @@ func (s *Store) SubmitKYC(ctx context.Context, k KYC) error {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE users SET kyc_status='pending', updated_at=? WHERE id=?`, Now(), k.UserID); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// SetKYCResult записывает итог внешней проверки (МСИ, Sumsub или их тестовые копии): status — pending, approved или rejected.
+// Пока провайдер не вернул данные, вместо идентификационного номера хранится заглушка (номер уникален по таблице).
+// Непустые поля из k перезаписывают сохранённые, пустые — не трогают.
+func (s *Store) SetKYCResult(ctx context.Context, k KYC) error {
+	if k.PersonalNumber == "" {
+		k.PersonalNumber = fmt.Sprintf("pending-%d", k.UserID)
+	}
+	if k.Citizenship == "" {
+		k.Citizenship = "BY"
+	}
+	now := Now()
+	var reviewed any
+	if k.Status != "pending" {
+		reviewed = now
+	}
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	_, err = tx.ExecContext(ctx, `INSERT INTO kyc(user_id, last_name, first_name, middle_name, birth_date, personal_number, doc_number, doc_issued_at, citizenship, address, doc_file, selfie_file, status, reject_reason, submitted_at, reviewed_at, method, provider_ref)
+		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+		ON CONFLICT(user_id) DO UPDATE SET
+		last_name=CASE WHEN excluded.last_name!='' THEN excluded.last_name ELSE kyc.last_name END,
+		first_name=CASE WHEN excluded.first_name!='' THEN excluded.first_name ELSE kyc.first_name END,
+		middle_name=CASE WHEN excluded.middle_name!='' THEN excluded.middle_name ELSE kyc.middle_name END,
+		birth_date=CASE WHEN excluded.birth_date!='' THEN excluded.birth_date ELSE kyc.birth_date END,
+		personal_number=CASE WHEN excluded.personal_number NOT LIKE 'pending-%' OR kyc.personal_number LIKE 'pending-%' THEN excluded.personal_number ELSE kyc.personal_number END,
+		doc_number=CASE WHEN excluded.doc_number!='' THEN excluded.doc_number ELSE kyc.doc_number END,
+		doc_issued_at=CASE WHEN excluded.doc_issued_at!='' THEN excluded.doc_issued_at ELSE kyc.doc_issued_at END,
+		address=CASE WHEN excluded.address!='' THEN excluded.address ELSE kyc.address END,
+		doc_file=CASE WHEN excluded.doc_file!='' THEN excluded.doc_file ELSE kyc.doc_file END,
+		selfie_file=CASE WHEN excluded.selfie_file!='' THEN excluded.selfie_file ELSE kyc.selfie_file END,
+		status=excluded.status, reject_reason=excluded.reject_reason,
+		submitted_at=CASE WHEN excluded.status='pending' OR kyc.method!=excluded.method THEN excluded.submitted_at ELSE kyc.submitted_at END,
+		reviewed_at=excluded.reviewed_at, method=excluded.method,
+		provider_ref=CASE WHEN excluded.provider_ref!='' THEN excluded.provider_ref ELSE kyc.provider_ref END`,
+		k.UserID, k.LastName, k.FirstName, k.MiddleName, k.BirthDate, k.PersonalNumber, k.DocNumber, k.DocIssuedAt, k.Citizenship, k.Address,
+		k.DocFile, k.SelfieFile, k.Status, k.RejectReason, now, reviewed, k.Method, k.ProviderRef)
+	if err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE users SET kyc_status=?, updated_at=? WHERE id=?`, k.Status, now, k.UserID); err != nil {
 		return err
 	}
 	return tx.Commit()

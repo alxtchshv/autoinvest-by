@@ -41,9 +41,9 @@ export default function History() {
         </div>
         <p className="small muted mt8">Без дат — за всё время. В выписке указан курс доллара НБРБ на момент каждой операции.</p>
       </section>
-      <div className="row wrap g12" style={{ margin: "20px 0 16px" }}>
+      <div className="row wrap g12 ops-filter">
         <Segmented label="Тип операции" value={side} onChange={(v) => { setSide(v); setPage(1); }} options={[{ value: "", label: "Все" }, { value: "buy", label: "Пополнения" }, { value: "sell", label: "Выводы" }]} />
-        <select className="select" style={{ width: 240, height: 38 }} value={plan} aria-label="Копилка" onChange={(e) => { setPage(1); const n = new URLSearchParams(sp); if (e.target.value) n.set("plan", e.target.value); else n.delete("plan"); setSp(n); }}>
+        <select className="select" style={{ width: 240 }} value={plan} aria-label="Копилка" onChange={(e) => { setPage(1); const n = new URLSearchParams(sp); if (e.target.value) n.set("plan", e.target.value); else n.delete("plan"); setSp(n); }}>
           <option value="">Все копилки</option>
           {plans.data?.plans.map((p) => <option key={p.id} value={p.id}>{p.name}{p.status === "closed" ? " (закрыта)" : ""}</option>)}
         </select>

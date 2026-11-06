@@ -7,7 +7,7 @@ import { useLoad, useSubmit, useTitle } from "../../lib/hooks";
 import { useSession } from "../../lib/session";
 import type { Alloc, Card, Plan, Strategy } from "../../lib/types";
 import { AssetIcon, Button, Field, Input, Modal, Notice, PLAN_ICONS, Segmented, Switch, useToast } from "../../components/ui";
-import { PlanTile } from "../../components/plans";
+import { PlanChip, PlanTile } from "../../components/plans";
 import { findBank } from "../../lib/banks";
 import { addMonths, DatePicker, isoDate, longDate, parseIso } from "../../components/DatePicker";
 
@@ -48,7 +48,7 @@ export function SchedulePicker({ value, onChange }: { value: Schedule; onChange:
   );
 }
 
-export function StrategyPicker({ strategy, allocations, onChange, isPro }: { strategy: string; allocations: Alloc[]; onChange: (s: string, a: Alloc[]) => void; isPro: boolean }) {
+export function StrategyPicker({ strategy, allocations, onChange, isPro, compact }: { strategy: string; allocations: Alloc[]; onChange: (s: string, a: Alloc[]) => void; isPro: boolean; compact?: boolean }) {
   const { config } = useSession();
   const [mode, setMode] = useState<"ready" | "custom">(strategy === "custom" ? "custom" : "ready");
   const sum = allocations.reduce((s, a) => s + a.weight_bp, 0);
@@ -60,15 +60,20 @@ export function StrategyPicker({ strategy, allocations, onChange, isPro }: { str
   const choose = (st: Strategy) => onChange(st.id, Object.entries(st.weights).map(([asset, weight_bp]) => ({ asset, weight_bp })).sort((a, b) => b.weight_bp - a.weight_bp));
   return (
     <div className="stack g16">
-      <Segmented label="Тип состава" value={mode} onChange={(m) => {
+      <Segmented fill label="Тип состава" value={mode} onChange={(m) => {
         setMode(m);
         if (m === "ready") choose(config!.strategies.find((x) => x.id === "balanced") || config!.strategies[0]);
         else onChange("custom", allocations.length ? allocations : [{ asset: "USDT", weight_bp: 5000 }, { asset: "BTC", weight_bp: 5000 }]);
       }} options={[{ value: "ready", label: "Готовые планы" }, { value: "custom", label: "Свой состав" }]} />
-      {mode === "ready" ? (
+      {mode === "ready" ? (compact ? (
+        <div className="plan-chips">
+          {config?.strategies.map((st) => <PlanChip key={st.id} s={st} selected={strategy === st.id} onSelect={() => choose(st)} />)}
+        </div>
+      ) : (
         <div className="plan-tiles">
           {config?.strategies.map((st) => <PlanTile key={st.id} s={st} selected={strategy === st.id} onSelect={() => choose(st)} />)}
         </div>
+      )
       ) : !isPro ? (
         <Notice kind="info" title="Свой состав — в тарифе Pro">Соберите копилку из любых активов в нужных пропорциях. <Link to="/app/profile/billing">Подключить Pro</Link></Notice>
       ) : (

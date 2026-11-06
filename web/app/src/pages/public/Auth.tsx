@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { api } from "../../lib/api";
 import { useSubmit, useTitle } from "../../lib/hooks";
@@ -100,8 +100,11 @@ export function Register() {
   const [f, setF] = useState({ name: "", email: "", phone: "", password: "", offer: false, privacy: false });
   const s = useSubmit();
   const ref = sp.get("ref") || "";
+  // После регистрации переход в анкету делает onSubmit. Роутер применяет навигацию как переход
+  // с низким приоритетом, поэтому без этого флага эффект «уже вошёл → /app» успевает его перебить.
+  const justRegistered = useRef(false);
   useEffect(() => {
-    if (me?.user) nav("/app", { replace: true });
+    if (me?.user && !justRegistered.current) nav("/app", { replace: true });
   }, [me, nav]);
   const [score, label] = strength(f.password);
   const onSubmit = async (e: FormEvent) => {
@@ -109,9 +112,9 @@ export function Register() {
     try {
       const r = await s.submit(() => api.post<Me>("/auth/register", { name: f.name, email: f.email, phone: f.phone, password: f.password, ref, accept_offer: f.offer, accept_privacy: f.privacy }));
       if (r) {
-        // сначала уходим со страницы, иначе эффект «уже вошёл → /app» перебьёт переход в анкету
-        nav(safeNext(sp.get("next") || "/app/onboarding"), { replace: true });
+        justRegistered.current = true;
         setMe(r);
+        nav(safeNext(sp.get("next") || "/app/onboarding"), { replace: true });
       }
     } catch {
       /* */

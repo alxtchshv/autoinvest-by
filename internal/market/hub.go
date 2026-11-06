@@ -36,7 +36,6 @@ type SourceStatus struct {
 type Hub struct {
 	sources  []Source
 	stockSrc Source // акции и фонды (Yahoo); опрашивается реже, чем крипта
-	stockAt  time.Time
 	rateSrc  RateSource
 	fixture  bool
 	spreadBP int64
@@ -99,13 +98,58 @@ func NewFixtureHub(spreadBP int64, log *slog.Logger) *Hub {
 // stockRefreshEvery — акции торгуются по расписанию биржи, частый опрос не нужен.
 const stockRefreshEvery = 30 * time.Second
 
+// refreshStocks обновляет котировки акций. Работает в своём цикле: медленный ответ Yahoo
+// не должен задерживать обновление крипты, а при сбое источник не дёргается чаще раза в 30 секунд.
+// Новые цены уходят подписчикам со следующим обновлением крипты (не позже чем через 5 секунд).
+func (h *Hub) refreshStocks(ctx context.Context) {
+	if h.stockSrc == nil {
+		return
+	}
+	var stocks []Asset
+	for _, a := range Catalog {
+		if a.Yahoo != "" {
+			stocks = append(stocks, a)
+		}
+	}
+	c, cancel := context.WithTimeout(ctx, 20*time.Second)
+	sq, err := h.stockSrc.Quotes(c, stocks)
+	cancel()
+	h.mark(h.stockSrc.Name(), err)
+	if err != nil {
+		h.log.Debug("котировки акций недоступны", "err", err)
+		return
+	}
+	h.mu.Lock()
+	for k, v := range sq {
+		if a, ok := Find(k); ok && a.Yahoo != "" {
+			h.quotes[k] = v
+		}
+	}
+	h.mu.Unlock()
+}
+
 func (h *Hub) IsFixture() bool { return h.fixture }
 
 // Start запускает фоновое обновление котировок (каждые 5 с) и курсов (каждые 30 мин).
 func (h *Hub) Start(ctx context.Context) {
 	h.refreshRates(ctx)
+	h.refreshStocks(ctx)
 	h.refreshQuotes(ctx)
 	go h.loadHistory(ctx)
+	if h.stockSrc != nil {
+		go func() {
+			t := time.NewTicker(stockRefreshEvery)
+			defer t.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-t.C:
+					h.refreshStocks(ctx)
+				}
+			}
+		}()
+	}
 	go func() {
 		qt := time.NewTicker(5 * time.Second)
 		rt := time.NewTicker(30 * time.Minute)
@@ -206,29 +250,6 @@ func (h *Hub) refreshQuotes(ctx context.Context) {
 		}
 		if err != nil {
 			h.log.Debug("источник котировок недоступен", "source", s.Name(), "err", err)
-		}
-	}
-	if h.stockSrc != nil && time.Since(h.stockAt) >= stockRefreshEvery {
-		var stocks []Asset
-		for _, a := range Catalog {
-			if a.Yahoo != "" {
-				stocks = append(stocks, a)
-			}
-		}
-		c, cancel := context.WithTimeout(ctx, 15*time.Second)
-		sq, err := h.stockSrc.Quotes(c, stocks)
-		cancel()
-		h.mark(h.stockSrc.Name(), err)
-		if err == nil {
-			h.stockAt = time.Now()
-			if got == nil {
-				got = map[string]Quote{}
-			}
-			for k, v := range sq {
-				if a, ok := Find(k); ok && a.Yahoo != "" {
-					got[k] = v
-				}
-			}
 		}
 	}
 	h.mu.Lock()

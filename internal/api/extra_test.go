@@ -1,0 +1,169 @@
+package api
+
+import (
+	"testing"
+	"time"
+
+	"autoinvest/internal/store"
+)
+
+func TestRegistrationNeedsBothSeparateConsentsAndStoresThem(t *testing.T) {
+	srv, s := newServer(t)
+	c := newClient(t, srv.URL)
+	base := map[string]any{"name": "Иван Петров", "email": "c@test.by", "password": "parol2026"}
+	for _, missing := range []string{"accept_offer", "accept_privacy"} {
+		body := map[string]any{"accept_offer": true, "accept_privacy": true}
+		for k, v := range base {
+			body[k] = v
+		}
+		delete(body, missing)
+		var e apiErr
+		if code := c.do("POST", "/api/v1/auth/register", body, &e); code != 422 || e.Field != missing {
+			t.Fatalf("without %s: code %d field %q", missing, code, e.Field)
+		}
+	}
+	c.register("c@test.by")
+	u, _ := s.St.UserByEmail(t.Context(), "c@test.by")
+	consents, err := s.St.Consents(t.Context(), u.ID)
+	if err != nil || len(consents) != 3 {
+		t.Fatalf("expected offer, risks and privacy consents, got %+v %v", consents, err)
+	}
+	for _, x := range consents {
+		if x.Version != LegalVersion || x.IP == "" {
+			t.Fatalf("consent without version or IP: %+v", x)
+		}
+	}
+}
+
+func TestLoginHistoryRecordsDeviceAndRevokeAllLogsOut(t *testing.T) {
+	srv, _ := newServer(t)
+	c := newClient(t, srv.URL)
+	c.register("h@test.by")
+	c.do("POST", "/api/v1/auth/login", map[string]any{"email": "h@test.by", "password": "wrong-pass1"}, nil)
+
+	var hist struct{ Events []store.AuditEntry }
+	if code := c.do("GET", "/api/v1/me/logins", nil, &hist); code != 200 {
+		t.Fatalf("logins: %d", code)
+	}
+	actions := map[string]bool{}
+	for _, e := range hist.Events {
+		actions[e.Action] = true
+		if e.UserAgent == "" {
+			t.Fatalf("event without device: %+v", e)
+		}
+	}
+	if !actions["auth.register"] || !actions["auth.login_failed"] {
+		t.Fatalf("history must contain registration and the failed attempt: %v", actions)
+	}
+
+	other := newClient(t, srv.URL)
+	other.do("POST", "/api/v1/auth/login", map[string]any{"email": "h@test.by", "password": "parol2026"}, nil)
+	if code := c.do("POST", "/api/v1/me/sessions/revoke-all", map[string]any{}, nil); code != 200 {
+		t.Fatalf("revoke-all: %d", code)
+	}
+	for name, cl := range map[string]*client{"current": c, "other": other} {
+		if code := cl.do("GET", "/api/v1/me/logins", nil, nil); code != 401 {
+			t.Fatalf("%s device still logged in: %d", name, code)
+		}
+	}
+}
+
+func TestCardMaskNeverContainsFullNumber(t *testing.T) {
+	srv, _ := newServer(t)
+	c := newClient(t, srv.URL)
+	c.register("m@test.by")
+	c.bindCard()
+	var cards struct{ Cards []store.Card }
+	c.do("GET", "/api/v1/cards", nil, &cards)
+	got := cards.Cards[0]
+	if got.Mask != "4200 00•• •••• 0000" || got.BIN != "420000" {
+		t.Fatalf("mask %q bin %q", got.Mask, got.BIN)
+	}
+}
+
+func TestStatementShowsVenueAndRespectsPeriod(t *testing.T) {
+	srv, _ := newServer(t)
+	c := newClient(t, srv.URL)
+	c.register("st@test.by")
+	c.bindCard()
+	c.plan("Подушка", true)
+
+	var st struct {
+		Operations []struct {
+			Venue  string  `json:"venue"`
+			USDBYN float64 `json:"usd_byn"`
+		}
+		LiveBroker bool `json:"live_broker"`
+	}
+	today := time.Now().Format("2006-01-02")
+	if code := c.do("GET", "/api/v1/operations/statement?from="+today+"&to="+today, nil, &st); code != 200 || len(st.Operations) != 1 {
+		t.Fatalf("statement: %d %+v", code, st)
+	}
+	if st.LiveBroker || st.Operations[0].Venue != venueLabel("paper") || st.Operations[0].USDBYN <= 0 {
+		t.Fatalf("paper trade must be labelled honestly and carry the NBRB rate: %+v", st)
+	}
+	if code := c.do("GET", "/api/v1/operations/statement?from=2020-01-01&to=2020-01-31", nil, &st); code != 200 || len(st.Operations) != 0 {
+		t.Fatalf("period filter ignored: %d %d", code, len(st.Operations))
+	}
+	if code := c.do("GET", "/api/v1/operations/statement?from=2020-02-01&to=2020-01-01", nil, nil); code != 400 {
+		t.Fatalf("reversed period must be rejected: %d", code)
+	}
+}
+
+func TestPersonalNumberChecks(t *testing.T) {
+	born := time.Date(1995, 1, 1, 0, 0, 0, 0, time.UTC)
+	cases := map[string]bool{
+		"3010195A001PB7": true,  // мужчина, 01.01.1995, Брестская обл.
+		"3010195Z001PB7": false, // нет такой области
+		"7010195A001PB7": false, // первая цифра вне 1–6
+		"3020195A001PB7": false, // дата не совпадает
+		"3013295A001PB7": false, // 32-й месяц
+		"3010195a001pb7": false, // строчные буквы
+	}
+	for pn, ok := range cases {
+		if got := checkPersonalNumber(pn, born) == ""; got != ok {
+			t.Errorf("%s: valid=%v, want %v (%s)", pn, got, ok, checkPersonalNumber(pn, born))
+		}
+	}
+}
+
+func TestRecommendations(t *testing.T) {
+	cases := []struct {
+		answers  [4]int
+		strategy string
+	}{
+		{[4]int{2, 1, 3, 3}, "reserve"},  // деньги нужны через полгода
+		{[4]int{2, 3, 1, 3}, "reserve"},  // паника при просадке
+		{[4]int{2, 3, 3, 1}, "reserve"},  // подушка безопасности
+		{[4]int{2, 2, 2, 2}, "balanced"}, // середина
+		{[4]int{3, 3, 3, 3}, "crypto"},   // долгий горизонт, докупает, пенсия
+		{[4]int{3, 3, 2, 3}, "balanced"}, // готов лишь переждать падение — без крипто-роста
+		{[4]int{3, 3, 3, 2}, "balanced"}, // крупная покупка к сроку
+	}
+	for _, c := range cases {
+		r := Recommend(c.answers)
+		if r.Strategy != c.strategy || len(r.Reasons) == 0 || r.AmountKop <= 0 {
+			t.Errorf("%v: got %+v, want %s", c.answers, r, c.strategy)
+		}
+	}
+	if Recommend([4]int{1, 3, 3, 3}).AmountKop >= Recommend([4]int{3, 3, 3, 3}).AmountKop {
+		t.Error("amount must grow with the comfortable monthly sum")
+	}
+}
+
+func TestOnboardingSavesProfile(t *testing.T) {
+	srv, s := newServer(t)
+	c := newClient(t, srv.URL)
+	c.register("o@test.by")
+	var out struct{ Recommendation Recommendation }
+	if code := c.do("POST", "/api/v1/me/onboarding", map[string]any{"answers": []int{2, 3, 2, 3}}, &out); code != 200 {
+		t.Fatalf("onboarding: %d", code)
+	}
+	u, _ := s.St.UserByEmail(t.Context(), "o@test.by")
+	if u.OnboardedAt == nil || u.RiskProfile != out.Recommendation.Profile {
+		t.Fatalf("profile not saved: %+v", u)
+	}
+	if code := c.do("POST", "/api/v1/me/onboarding", map[string]any{"answers": []int{2, 3}}, nil); code != 400 {
+		t.Fatalf("partial answers must be rejected: %d", code)
+	}
+}

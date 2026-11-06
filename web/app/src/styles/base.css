@@ -1,0 +1,101 @@
+/* AutoInvest — дизайн-система.
+   Светлая, спокойная, как у банковского веба: бумага, белые листы, чернильный текст, один кобальтовый акцент.
+   Рост и падение — отдельные цвета, бренд намеренно не зелёный. */
+
+:root {
+  --paper: #f4f5f7;
+  --surface: #ffffff;
+  --sunken: #f8f9fa;
+  --ink: #161a23;
+  --ink-2: #3a404d;
+  --muted: #5d6573;
+  --faint: #8a919e;
+  --line: #e2e5ea;
+  --line-2: #eef0f3;
+
+  --brand: #2340d8;
+  --brand-hover: #1a31b8;
+  --brand-ink: #1a2fa6;
+  --brand-soft: #eaeefd;
+
+  --up: #0a7a4b;
+  --up-soft: #e4f4ec;
+  --down: #c2372b;
+  --down-soft: #fbe9e7;
+  --warn: #9a5a00;
+  --warn-soft: #fff4e0;
+
+  --r-sheet: 16px;
+  --r-ctl: 10px;
+  --r-sm: 6px;
+  --shadow-pop: 0 12px 32px rgba(22, 26, 35, 0.14), 0 2px 6px rgba(22, 26, 35, 0.06);
+
+  --font: "Onest Variable", "Onest", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --sidebar: 248px;
+  --content: 1120px;
+
+  color-scheme: light;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font);
+  font-size: 15px;
+  line-height: 1.5;
+  color: var(--ink);
+  background: var(--paper);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-feature-settings: "cv11";
+}
+
+h1, h2, h3, h4, p { margin: 0; }
+h1 { font-size: 28px; line-height: 34px; font-weight: 640; letter-spacing: -0.02em; }
+h2 { font-size: 20px; line-height: 26px; font-weight: 620; letter-spacing: -0.012em; }
+h3 { font-size: 16px; line-height: 22px; font-weight: 600; }
+
+a { color: var(--brand); text-decoration: none; }
+a:hover { color: var(--brand-hover); }
+img, svg { display: block; }
+button, input, select, textarea { font: inherit; color: inherit; }
+
+.num, .tnum { font-variant-numeric: tabular-nums; }
+.muted { color: var(--muted); }
+.faint { color: var(--faint); }
+.up { color: var(--up); }
+.down { color: var(--down); }
+.small { font-size: 13px; line-height: 18px; }
+.tiny { font-size: 12px; line-height: 16px; }
+.nowrap { white-space: nowrap; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; border-radius: 4px; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+}
+
+::selection { background: #c9d3fb; }
+
+/* ---------- раскладка ---------- */
+.stack { display: flex; flex-direction: column; }
+.row { display: flex; align-items: center; }
+.wrap { flex-wrap: wrap; }
+.between { justify-content: space-between; }
+.g4 { gap: 4px; } .g8 { gap: 8px; } .g12 { gap: 12px; } .g16 { gap: 16px; } .g24 { gap: 24px; } .g32 { gap: 32px; }
+.grow { flex: 1 1 auto; min-width: 0; }
+.mt8 { margin-top: 8px; } .mt16 { margin-top: 16px; } .mt24 { margin-top: 24px; } .mt32 { margin-top: 32px; }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+@media (max-width: 860px) { .grid2, .grid3 { grid-template-columns: minmax(0, 1fr); } }

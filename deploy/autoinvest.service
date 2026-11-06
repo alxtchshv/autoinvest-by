@@ -1,0 +1,19 @@
+# Без Docker: бинарник в /opt/autoinvest, данные в /var/lib/autoinvest, настройки в /opt/autoinvest/.env
+[Unit]
+Description=AutoInvest
+After=network-online.target
+
+[Service]
+User=autoinvest
+WorkingDirectory=/opt/autoinvest
+EnvironmentFile=/opt/autoinvest/.env
+Environment=DATA_DIR=/var/lib/autoinvest APP_ENV=production
+ExecStart=/opt/autoinvest/autoinvest
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/autoinvest
+
+[Install]
+WantedBy=multi-user.target

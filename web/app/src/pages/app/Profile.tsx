@@ -1,0 +1,565 @@
+import { useEffect, useState, type FormEvent } from "react";
+import { NavLink, useNavigate, useParams } from "react-router-dom";
+import QRCode from "qrcode";
+import { Copy } from "lucide-react";
+import { api } from "../../lib/api";
+import { ago, byn, date, dateTime } from "../../lib/format";
+import { useLoad, useSubmit, useTitle } from "../../lib/hooks";
+import { useSession } from "../../lib/session";
+import type { AuditEvent, Consent, KYC, Me, Payment, Session } from "../../lib/types";
+import { Button, Field, Input, LoadError, Modal, Notice, PageLoader, Switch, useToast } from "../../components/ui";
+import { LogoutButton } from "../../components/layout";
+
+const TABS = [
+  ["personal", "Личные данные"], ["verification", "Верификация"], ["security", "Безопасность"], ["notifications", "Уведомления"],
+  ["billing", "Тариф"], ["referral", "Пригласить друга"], ["risk", "Риск-профиль"],
+] as const;
+
+export default function Profile() {
+  const { tab = "personal" } = useParams();
+  const title = TABS.find((t) => t[0] === tab)?.[1] || "Профиль";
+  useTitle(title);
+  return (
+    <div>
+      <div className="page-head"><h1>Профиль</h1><LogoutButton /></div>
+      <div className="profile-layout">
+        <nav className="profile-nav" aria-label="Разделы профиля">
+          {TABS.map(([k, l]) => <NavLink key={k} to={`/app/profile/${k}`}>{l}{k === "verification" && <KycBadge />}</NavLink>)}
+        </nav>
+        <div className="stack g16">
+          {tab === "personal" && <Personal />}
+          {tab === "verification" && <Verification />}
+          {tab === "security" && <Security />}
+          {tab === "notifications" && <NotifySettings />}
+          {tab === "billing" && <Billing />}
+          {tab === "referral" && <Referral />}
+          {tab === "risk" && <RiskQuiz />}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Personal() {
+  const { me, setMe } = useSession();
+  const toast = useToast();
+  const u = me!.user!;
+  const [name, setName] = useState(u.name);
+  const [phone, setPhone] = useState(u.phone);
+  const s = useSubmit();
+  const [delOpen, setDelOpen] = useState(false);
+  return (
+    <>
+      <form className="sheet" onSubmit={async (e) => { e.preventDefault(); try { const r = await s.submit(() => api.patch<Me>("/me", { name, phone })); if (r) { setMe(r); toast("Сохранено"); } } catch { /* */ } }}>
+        <div className="sheet-head"><h2>Личные данные</h2></div>
+        <div className="sheet-body stack g16" style={{ maxWidth: 520 }}>
+          <Field label="Имя" error={s.fieldError("name")}><Input value={name} onChange={(e) => setName(e.target.value)} /></Field>
+          <Field label="Телефон" error={s.fieldError("phone")}><Input type="tel" value={phone} placeholder="+375 29 123-45-67" onChange={(e) => setPhone(e.target.value)} /></Field>
+          <Field label="Почта" hint={u.email_verified ? "Подтверждена" : undefined}>
+            <Input value={u.email} disabled />
+          </Field>
+          {!u.email_verified && <ResendVerification />}
+          <div><Button type="submit" variant="primary" busy={s.busy}>Сохранить</Button></div>
+        </div>
+      </form>
+      <section className="sheet">
+        <div className="sheet-head"><h2>Аккаунт</h2></div>
+        <div className="sheet-body stack g12 small">
+          <div className="row between"><span className="muted">Зарегистрирован</span><span>{date(u.created_at)}</span></div>
+          <div className="row between"><span className="muted">Номер клиента</span><span className="num">{String(u.id).padStart(6, "0")}</span></div>
+          <div className="divider" />
+          <div className="row between wrap g12">
+            <span className="muted">Удалить аккаунт и персональные данные. Сначала выведите деньги из копилок.</span>
+            <Button variant="danger" size="sm" onClick={() => setDelOpen(true)}>Удалить аккаунт</Button>
+          </div>
+        </div>
+      </section>
+      <DeleteAccount open={delOpen} onClose={() => setDelOpen(false)} />
+    </>
+  );
+}
+
+function ResendVerification() {
+  const toast = useToast();
+  const s = useSubmit();
+  return (
+    <Notice kind="warn" title="Почта не подтверждена">
+      Мы отправили письмо со ссылкой при регистрации.{" "}
+      <button className="link-btn" disabled={s.busy} onClick={async () => { try { await s.submit(() => api.post("/auth/resend-verification")); toast("Письмо отправлено"); } catch (e: any) { toast(e.message, "error"); } }}>Отправить ещё раз</button>
+    </Notice>
+  );
+}
+
+function DeleteAccount({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const { reload } = useSession();
+  const nav = useNavigate();
+  const [p, setP] = useState("");
+  const s = useSubmit();
+  return (
+    <Modal open={open} onClose={onClose} title="Удалить аккаунт?">
+      <form className="stack g16" onSubmit={async (e) => { e.preventDefault(); try { await s.submit(() => api.post("/me/delete", { password: p })); await reload(); nav("/"); } catch { /* */ } }}>
+        <p>Копилки будут закрыты, карты отвязаны, персональные данные удалены. История операций сохранится обезличенно, как требует закон. Действие нельзя отменить.</p>
+        <Field label="Пароль для подтверждения" error={s.fieldError("password")}><Input type="password" value={p} onChange={(e) => setP(e.target.value)} /></Field>
+        {s.error && !s.field && <Notice kind="error">{s.error}</Notice>}
+        <div className="row g8" style={{ justifyContent: "flex-end" }}><Button onClick={onClose}>Отмена</Button><Button type="submit" variant="danger" busy={s.busy}>Удалить навсегда</Button></div>
+      </form>
+    </Modal>
+  );
+}
+
+// ---------------------------------------------------------------- верификация
+
+function Verification() {
+  const { reload: reloadMe } = useSession();
+  const { data, error, loading, reload } = useLoad(() => api.get<{ kyc: KYC | null }>("/kyc"), []);
+  const [edit, setEdit] = useState(false);
+  if (loading && !data) return <PageLoader />;
+  if (error) return <LoadError error={error} retry={reload} />;
+  const k = data!.kyc;
+  if (k && !edit && k.status !== "rejected") {
+    return (
+      <section className="sheet">
+        <div className="sheet-head"><h2>Верификация личности</h2>{k.status === "approved" ? <span className="badge badge-up">Подтверждена</span> : <span className="badge badge-warn">На проверке</span>}</div>
+        <div className="sheet-body stack g16">
+          {k.status === "pending" && <Notice kind="info">Документы на проверке с {dateTime(k.submitted_at)}. Обычно это занимает до одного рабочего дня — пришлём уведомление.</Notice>}
+          <dl className="kv">
+            <dt>ФИО</dt><dd>{k.last_name} {k.first_name} {k.middle_name}</dd>
+            <dt>Дата рождения</dt><dd>{k.birth_date.split("-").reverse().join(".")}</dd>
+            <dt>Паспорт</dt><dd>{k.doc_number.slice(0, 2)}•••••{k.doc_number.slice(-2)}</dd>
+            <dt>Идентификационный номер</dt><dd>{k.personal_number.slice(0, 3)}•••••••••{k.personal_number.slice(-2)}</dd>
+          </dl>
+          {k.status === "pending" && <div><Button size="sm" onClick={() => setEdit(true)}>Исправить данные</Button></div>}
+        </div>
+      </section>
+    );
+  }
+  return <KYCForm initial={k} onDone={() => { setEdit(false); reload(); reloadMe(); }} />;
+}
+
+function KYCForm({ initial, onDone }: { initial: KYC | null; onDone: () => void }) {
+  const toast = useToast();
+  const [f, setF] = useState({
+    last_name: initial?.last_name || "", first_name: initial?.first_name || "", middle_name: initial?.middle_name || "",
+    birth_date: initial?.birth_date || "", personal_number: initial?.personal_number || "", doc_number: initial?.doc_number || "",
+    doc_issued_at: initial?.doc_issued_at || "", address: initial?.address || "",
+  });
+  const [doc, setDoc] = useState<File | null>(null);
+  const [selfie, setSelfie] = useState<File | null>(null);
+  const s = useSubmit();
+  const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement>) => setF({ ...f, [k]: e.target.value });
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    const fd = new FormData();
+    Object.entries(f).forEach(([k, v]) => fd.append(k, v));
+    if (doc) fd.append("doc_file", doc);
+    if (selfie) fd.append("selfie_file", selfie);
+    try { await s.submit(() => api.post("/kyc", fd)); toast("Документы отправлены на проверку"); onDone(); } catch { /* */ }
+  };
+  return (
+    <form className="sheet" onSubmit={submit}>
+      <div className="sheet-head"><h2>Верификация личности</h2></div>
+      <div className="sheet-body stack g16" style={{ maxWidth: 640 }}>
+        {initial?.status === "rejected" && <Notice kind="error" title="Верификация не пройдена">{initial.reject_reason}</Notice>}
+        <p className="small muted">По требованиям законодательства о предотвращении легализации доходов операции с токенами доступны после идентификации. Данные видит только сотрудник проверки и передаются оператору криптоплатформы.</p>
+        {s.error && !s.field && <Notice kind="error">{s.error}</Notice>}
+        <div className="grid3">
+          <Field label="Фамилия" error={s.fieldError("last_name")}><Input value={f.last_name} onChange={set("last_name")} /></Field>
+          <Field label="Имя" error={s.fieldError("first_name")}><Input value={f.first_name} onChange={set("first_name")} /></Field>
+          <Field label="Отчество"><Input value={f.middle_name} onChange={set("middle_name")} /></Field>
+        </div>
+        <div className="grid2">
+          <Field label="Дата рождения" error={s.fieldError("birth_date")}><Input type="date" value={f.birth_date} onChange={set("birth_date")} /></Field>
+          <Field label="Серия и номер паспорта" error={s.fieldError("doc_number")}><Input value={f.doc_number} onChange={(e) => setF({ ...f, doc_number: e.target.value.toUpperCase() })} placeholder="MP1234567" /></Field>
+        </div>
+        <div className="grid2">
+          <Field label="Идентификационный номер" error={s.fieldError("personal_number")} hint="14 символов, на странице паспорта с фото"><Input value={f.personal_number} onChange={(e) => setF({ ...f, personal_number: e.target.value.toUpperCase() })} maxLength={14} placeholder="3010195A001PB7" /></Field>
+          <Field label="Дата выдачи"><Input type="date" value={f.doc_issued_at} onChange={set("doc_issued_at")} /></Field>
+        </div>
+        <Field label="Адрес регистрации"><Input value={f.address} onChange={set("address")} placeholder="г. Минск, ул. …" /></Field>
+        <div className="grid2">
+          <Field label="Фото разворота паспорта" error={s.fieldError("doc_file")} hint={initial?.has_doc ? "Загружено. Можно заменить" : "JPG, PNG или PDF до 8 МБ"}>
+            <input type="file" accept="image/jpeg,image/png,application/pdf" onChange={(e) => setDoc(e.target.files?.[0] || null)} />
+          </Field>
+          <Field label="Селфи с паспортом" error={s.fieldError("selfie_file")} hint="Необязательно, ускоряет проверку">
+            <input type="file" accept="image/jpeg,image/png" onChange={(e) => setSelfie(e.target.files?.[0] || null)} />
+          </Field>
+        </div>
+        <div><Button type="submit" variant="primary" busy={s.busy}>Отправить на проверку</Button></div>
+      </div>
+    </form>
+  );
+}
+
+// ---------------------------------------------------------------- безопасность
+
+function Security() {
+  const { me, reload } = useSession();
+  const toast = useToast();
+  const sessions = useLoad(() => api.get<{ sessions: Session[] }>("/me/sessions"), []);
+  const audit = useLoad(() => api.get<{ events: AuditEvent[] }>("/me/audit"), []);
+  const logins = useLoad(() => api.get<{ events: AuditEvent[] }>("/me/logins"), []);
+  const consents = useLoad(() => api.get<{ consents: Consent[]; current_version: string }>("/me/consents"), []);
+  const { setMe } = useSession();
+  const nav = useNavigate();
+  const [allOut, setAllOut] = useState(false);
+  const [pw, setPw] = useState({ current: "", next: "" });
+  const pwS = useSubmit();
+  const [tfa, setTfa] = useState<null | { secret: string; url: string; qr: string }>(null);
+  const [code, setCode] = useState("");
+  const [codes, setCodes] = useState<string[] | null>(null);
+  const [disable, setDisable] = useState(false);
+  const tfaS = useSubmit();
+  const u = me!.user!;
+  const startTfa = async () => {
+    const r = await api.post<{ secret: string; url: string }>("/me/2fa/setup");
+    setTfa({ ...r, qr: await QRCode.toDataURL(r.url, { margin: 1, width: 320 }) });
+  };
+  const ACTIONS: Record<string, string> = {
+    "auth.login": "Вход", "auth.login_failed": "Неудачная попытка входа", "auth.register": "Регистрация", "security.password_changed": "Смена пароля",
+    "security.2fa_enabled": "Включена 2FA", "security.2fa_disabled": "Отключена 2FA", "card.added": "Привязана карта", "card.removed": "Удалена карта",
+    "auth.password_reset": "Восстановление пароля", "security.sessions_revoked": "Завершены сеансы", "security.session_revoked": "Завершён сеанс",
+    "plan.created": "Создана копилка", "plan.withdraw": "Вывод", "plan.closed": "Закрыта копилка", "telegram.link": "Подключён Telegram", "kyc.submitted": "Отправлены документы",
+    "auth.logout": "Выход", "security.sessions_revoked_all": "Выход на всех устройствах", "card.default": "Основная карта изменена", "plan.updated": "Изменена копилка",
+    "plan.paused": "Копилка на паузе", "plan.resumed": "Копилка включена", "kyc.review": "Проверка документов", "statement.export": "Выгружена выписка",
+    "privacy.data_export": "Выгружены персональные данные", "profile.onboarding": "Подобрана стратегия", "profile.risk": "Пройдена анкета", "billing.pro": "Оплачен Pro",
+    "auth.email_verified": "Подтверждена почта", "auth.recovery_code_used": "Использован код восстановления", "telegram.unlink": "Отключён Telegram",
+  };
+  const CONSENT: Record<string, [string, string]> = {
+    offer: ["Публичная оферта", "/legal/offer"], risks: ["Уведомление о рисках", "/legal/risks"], privacy: ["Обработка персональных данных", "/legal/privacy"],
+  };
+  return (
+    <>
+      <form className="sheet" onSubmit={async (e) => { e.preventDefault(); try { await pwS.submit(() => api.post("/me/password", { current: pw.current, new: pw.next })); setPw({ current: "", next: "" }); toast("Пароль изменён, другие устройства вышли из аккаунта"); sessions.reload(); } catch { /* */ } }}>
+        <div className="sheet-head"><h2>Пароль</h2></div>
+        <div className="sheet-body stack g16" style={{ maxWidth: 520 }}>
+          <Field label="Текущий пароль" error={pwS.fieldError("current")}><Input type="password" autoComplete="current-password" value={pw.current} onChange={(e) => setPw({ ...pw, current: e.target.value })} /></Field>
+          <Field label="Новый пароль" error={pwS.fieldError("new")} hint="Не короче 8 символов, буквы и цифры"><Input type="password" autoComplete="new-password" value={pw.next} onChange={(e) => setPw({ ...pw, next: e.target.value })} /></Field>
+          {pwS.error && !pwS.field && <Notice kind="error">{pwS.error}</Notice>}
+          <div><Button type="submit" busy={pwS.busy} disabled={!pw.current || !pw.next}>Сменить пароль</Button></div>
+        </div>
+      </form>
+
+      <section className="sheet">
+        <div className="sheet-head"><h2>Двухфакторная защита</h2>{u.totp_enabled ? <span className="badge badge-up">Включена</span> : <span className="badge">Выключена</span>}</div>
+        <div className="sheet-body stack g16">
+          {codes ? (
+            <>
+              <Notice kind="ok" title="Защита включена">Сохраните коды восстановления — каждый можно использовать один раз, если телефон потеряется.</Notice>
+              <div className="codes">{codes.map((c) => <span key={c}>{c}</span>)}</div>
+              <div><Button onClick={() => { navigator.clipboard?.writeText(codes.join("\n")); toast("Коды скопированы"); }} icon={<Copy />}>Скопировать</Button> <Button variant="ghost" onClick={() => setCodes(null)}>Готово</Button></div>
+            </>
+          ) : u.totp_enabled ? (
+            <div className="row between wrap g12"><span className="muted">При входе мы спрашиваем код из приложения-аутентификатора.</span><Button variant="danger" size="sm" onClick={() => setDisable(true)}>Отключить</Button></div>
+          ) : tfa ? (
+            <div className="row g24 wrap" style={{ alignItems: "flex-start" }}>
+              <img className="qr" src={tfa.qr} alt="QR-код для приложения-аутентификатора" />
+              <form className="stack g12 grow" style={{ minWidth: 240 }} onSubmit={async (e) => { e.preventDefault(); try { const r = await tfaS.submit(() => api.post<{ recovery_codes: string[] }>("/me/2fa/enable", { code })); if (r) { setCodes(r.recovery_codes); setTfa(null); setCode(""); reload(); } } catch { /* */ } }}>
+                <ol className="small" style={{ margin: 0, paddingLeft: 18, lineHeight: 1.7 }}>
+                  <li>Откройте Google Authenticator, Яндекс Ключ или 1Password</li>
+                  <li>Отсканируйте QR-код или введите ключ <code className="num" style={{ wordBreak: "break-all" }}>{tfa.secret}</code></li>
+                  <li>Введите 6 цифр из приложения</li>
+                </ol>
+                <Field error={tfaS.fieldError("code")}><Input inputMode="numeric" autoComplete="one-time-code" value={code} onChange={(e) => setCode(e.target.value)} placeholder="123456" style={{ maxWidth: 180 }} /></Field>
+                <div className="row g8"><Button type="submit" variant="primary" busy={tfaS.busy}>Включить</Button><Button variant="ghost" onClick={() => setTfa(null)}>Отмена</Button></div>
+              </form>
+            </div>
+          ) : (
+            <div className="row between wrap g12"><span className="muted">Даже если пароль узнают, без телефона в аккаунт не войти.</span><Button variant="primary" size="sm" onClick={startTfa}>Включить</Button></div>
+          )}
+        </div>
+      </section>
+
+      <section className="sheet">
+        <div className="sheet-head">
+          <h2>Активные сеансы</h2>
+          <div className="row g8 wrap">
+            {(sessions.data?.sessions.length || 0) > 1 && <Button size="sm" onClick={async () => { await api.post("/me/sessions/revoke-others"); sessions.reload(); toast("Другие сеансы завершены"); }}>Завершить остальные</Button>}
+            <Button size="sm" variant="danger" onClick={() => setAllOut(true)}>Выйти на всех устройствах</Button>
+          </div>
+        </div>
+        <div className="list">
+          {sessions.data?.sessions.map((x) => (
+            <div key={x.id} className="list-row">
+              <div className="grow"><div className="title">{x.user_agent}{x.current && <span className="badge badge-up" style={{ marginLeft: 8 }}>Это устройство</span>}</div><div className="sub">IP {x.ip} · активен {ago(x.last_seen_at)}</div></div>
+              {!x.current && <Button size="sm" variant="ghost" onClick={async () => { await api.del(`/me/sessions/${x.id}`); sessions.reload(); }}>Завершить</Button>}
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section className="sheet">
+        <div className="sheet-head"><h2>История входов</h2><span className="small muted">входы, неудачные попытки и выходы</span></div>
+        <div className="table-wrap">
+          <table className="table">
+            <thead><tr><th>Событие</th><th>Устройство</th><th>IP-адрес</th><th className="r">Когда</th></tr></thead>
+            <tbody>
+              {logins.data?.events.slice(0, 30).map((e, i) => (
+                <tr key={i} className={e.action === "auth.login_failed" ? "warn-row" : ""}><td>{ACTIONS[e.action] || e.action}</td><td className="small">{e.user_agent || "—"}</td><td className="muted small num">{e.ip || "—"}</td><td className="r small muted nowrap">{dateTime(e.created_at)}</td></tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div className="sheet-foot small muted">Не узнаёте вход? Смените пароль и нажмите «Выйти на всех устройствах».</div>
+      </section>
+
+      <section className="sheet">
+        <div className="sheet-head"><h2>Журнал действий</h2></div>
+        <div className="table-wrap">
+          <table className="table">
+            <tbody>
+              {audit.data?.events.filter((e) => !e.action.startsWith("auth.")).slice(0, 30).map((e, i) => (
+                <tr key={i}><td>{ACTIONS[e.action] || e.action}{e.details && <span className="muted"> · {e.details}</span>}</td><td className="muted small num">{e.ip}</td><td className="r small muted nowrap">{dateTime(e.created_at)}</td></tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section className="sheet">
+        <div className="sheet-head"><h2>Мои данные и согласия</h2></div>
+        <div className="sheet-body stack g12">
+          <div className="list">
+            {consents.data?.consents.map((c, i) => (
+              <div key={i} className="list-row">
+                <div className="grow"><div className="title"><a href={CONSENT[c.kind]?.[1]} target="_blank" rel="noreferrer">{CONSENT[c.kind]?.[0] || c.kind}</a></div><div className="sub">редакция {c.version.split("-").reverse().join(".")} · принято {dateTime(c.accepted_at)}{c.ip ? ` · IP ${c.ip}` : ""}</div></div>
+                {c.revoked_at ? <span className="badge">Отозвано</span> : <span className="badge badge-up">Действует</span>}
+              </div>
+            ))}
+            {consents.data && consents.data.consents.length === 0 && <p className="small muted">Аккаунт создан до появления раздельных согласий — условия приняты при регистрации.</p>}
+          </div>
+          <div className="row between wrap g12">
+            <span className="small muted">По Закону № 99-З вы вправе получить все свои данные. Отозвать согласие можно, удалив аккаунт во вкладке «Личные данные».</span>
+            <a className="btn btn-secondary btn-sm" href="/api/v1/me/export" download>Скачать мои данные</a>
+          </div>
+        </div>
+      </section>
+
+      <Modal open={allOut} onClose={() => setAllOut(false)} title="Выйти на всех устройствах?">
+        <p className="muted">Все сеансы, включая этот, будут завершены. Войти снова можно с паролем{u.totp_enabled ? " и кодом из приложения" : ""}.</p>
+        <div className="row g8 mt16" style={{ justifyContent: "flex-end" }}>
+          <Button variant="ghost" onClick={() => setAllOut(false)}>Отмена</Button>
+          <Button variant="danger" onClick={async () => { await api.post("/me/sessions/revoke-all"); setMe({ user: null }); nav("/login", { replace: true }); }}>Выйти везде</Button>
+        </div>
+      </Modal>
+
+      <Disable2FA open={disable} onClose={() => setDisable(false)} onDone={() => { setDisable(false); reload(); toast("Двухфакторная защита отключена"); }} />
+    </>
+  );
+}
+
+function Disable2FA({ open, onClose, onDone }: { open: boolean; onClose: () => void; onDone: () => void }) {
+  const [p, setP] = useState("");
+  const [c, setC] = useState("");
+  const s = useSubmit();
+  return (
+    <Modal open={open} onClose={onClose} title="Отключить двухфакторную защиту">
+      <form className="stack g16" onSubmit={async (e) => { e.preventDefault(); try { await s.submit(() => api.post("/me/2fa/disable", { password: p, code: c })); onDone(); } catch { /* */ } }}>
+        <Field label="Пароль" error={s.fieldError("password")}><Input type="password" value={p} onChange={(e) => setP(e.target.value)} /></Field>
+        <Field label="Код из приложения или код восстановления" error={s.fieldError("code")}><Input value={c} onChange={(e) => setC(e.target.value)} /></Field>
+        <div className="row g8" style={{ justifyContent: "flex-end" }}><Button onClick={onClose}>Отмена</Button><Button type="submit" variant="danger" busy={s.busy}>Отключить</Button></div>
+      </form>
+    </Modal>
+  );
+}
+
+// ---------------------------------------------------------------- уведомления
+
+function NotifySettings() {
+  const { me, setMe, config } = useSession();
+  const toast = useToast();
+  const u = me!.user!;
+  const upd = async (k: string, v: boolean) => {
+    try { setMe(await api.patch<Me>("/me/notifications", { [k]: v })); } catch (e: any) { toast(e.message, "error"); }
+  };
+  const link = async () => {
+    try {
+      const r = await api.post<{ url: string }>("/telegram/link");
+      window.open(r.url, "_blank", "noopener");
+      toast("Откройте Telegram и нажмите «Старт»");
+    } catch (e: any) { toast(e.message, "error"); }
+  };
+  return (
+    <>
+      <section className="sheet">
+        <div className="sheet-head"><h2>Telegram</h2>{me?.telegram_linked ? <span className="badge badge-up">Подключён</span> : <span className="badge">Не подключён</span>}</div>
+        <div className="sheet-body stack g12">
+          {me?.telegram_linked ? (
+            <div className="row between wrap g12">
+              <span>Уведомления приходят в Telegram{u.telegram_username ? ` @${u.telegram_username}` : ""}. В боте: /balance, /plans.</span>
+              <Button size="sm" onClick={async () => setMe(await api.del<Me>("/telegram/link"))}>Отключить</Button>
+            </div>
+          ) : config?.telegram_bot ? (
+            <div className="row between wrap g12">
+              <span className="muted">Чеки о пополнениях и ответы поддержки — сразу в мессенджер через бота @{config.telegram_bot}.</span>
+              <Button variant="primary" size="sm" onClick={link}>Подключить Telegram</Button>
+            </div>
+          ) : (
+            <span className="muted">Бот ещё не настроен администратором сервиса.</span>
+          )}
+        </div>
+      </section>
+      <section className="sheet">
+        <div className="sheet-head"><h2>Что присылать</h2></div>
+        <div className="sheet-body">
+          <div className="setting-row"><div><div style={{ fontWeight: 560 }}>Письма на почту</div><div className="small muted">Отказы в списании, выводы, безопасность, ответы поддержки</div></div><Switch label="Письма" checked={u.notify_email} onChange={(v) => upd("notify_email", v)} /></div>
+          <div className="setting-row"><div><div style={{ fontWeight: 560 }}>Сообщения в Telegram</div><div className="small muted">Все события по копилкам</div></div><Switch label="Telegram" checked={u.notify_telegram} onChange={(v) => upd("notify_telegram", v)} /></div>
+          <div className="setting-row"><div><div style={{ fontWeight: 560 }}>Резкие движения рынка</div><div className="small muted">Когда копилка докупила на просадке</div></div><Switch label="Рынок" checked={u.notify_market} onChange={(v) => upd("notify_market", v)} /></div>
+        </div>
+      </section>
+    </>
+  );
+}
+
+// ---------------------------------------------------------------- тариф
+
+function Billing() {
+  const { config, reload: reloadMe } = useSession();
+  const toast = useToast();
+  const { data, error, loading, reload } = useLoad(() => api.get<{ tier: string; is_pro: boolean; pro_until: number | null; autorenew: boolean; period: string; month_kop: number; year_kop: number; payments: Payment[] }>("/billing"), []);
+  const [period, setPeriod] = useState<"month" | "year">("month");
+  const s = useSubmit();
+  if (loading && !data) return <PageLoader />;
+  if (error) return <LoadError error={error} retry={reload} />;
+  const d = data!;
+  const buy = async () => {
+    try {
+      const r = await s.submit(() => api.post<{ code?: string; error?: string }>("/billing/pro", { period }));
+      toast(r?.code === "pending" ? r.error! : "Pro подключён");
+      reload(); reloadMe();
+    } catch (e: any) { toast(e.message, "error"); }
+  };
+  return (
+    <>
+      <section className="sheet">
+        <div className="sheet-head"><h2>Ваш тариф</h2>{d.is_pro ? <span className="badge badge-ink">Pro</span> : <span className="badge">Старт</span>}</div>
+        <div className="sheet-body stack g16">
+          {d.is_pro ? (
+            <>
+              <p>Pro действует до <b>{date(d.pro_until!)}</b>. {d.autorenew ? `Продлится автоматически: ${byn(d.period === "year" ? d.year_kop : d.month_kop)} с основной карты.` : "Автопродление выключено."}</p>
+              <div className="row g8">
+                {d.autorenew
+                  ? <Button size="sm" onClick={async () => { await api.post("/billing/autorenew", { on: false }); reload(); toast("Автопродление отключено"); }}>Отключить автопродление</Button>
+                  : <Button size="sm" variant="primary" onClick={async () => { await api.post("/billing/autorenew", { on: true }); reload(); }}>Включить автопродление</Button>}
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="grid2">
+                <button className="choice" aria-pressed={period === "month"} onClick={() => setPeriod("month")}><b>{byn(d.month_kop)}</b> в месяц</button>
+                <button className="choice" aria-pressed={period === "year"} onClick={() => setPeriod("year")}><b>{byn(d.year_kop)}</b> в год <span className="badge badge-up" style={{ marginLeft: 6 }}>−{Math.round((1 - d.year_kop / (d.month_kop * 12)) * 100)}%</span></button>
+              </div>
+              <ul className="small" style={{ margin: 0, paddingLeft: 18, lineHeight: 1.8 }}>
+                <li>До {config?.pro_plan_limit} копилок вместо {config?.free_plan_limit}</li>
+                <li>Свой состав копилки из любых активов</li>
+                <li>Докупка при падении цены</li>
+                <li>Комиссия {(config!.fee_pro_bp / 100).toString().replace(".", ",")}% вместо {(config!.fee_free_bp / 100).toString().replace(".", ",")}%</li>
+              </ul>
+              <div><Button variant="primary" busy={s.busy} onClick={buy}>Подключить за {byn(period === "year" ? d.year_kop : d.month_kop)}</Button></div>
+              <p className="tiny muted">Списание с основной карты. Отменить автопродление можно в любой момент в этом разделе.</p>
+            </>
+          )}
+        </div>
+      </section>
+      {d.payments.length > 0 && (
+        <section className="sheet">
+          <div className="sheet-head"><h2>Платежи за подписку</h2></div>
+          <div className="table-wrap"><table className="table"><tbody>
+            {d.payments.map((p) => <tr key={p.id}><td>{dateTime(p.created_at)}</td><td>{p.card_last4 ? "•• " + p.card_last4 : ""}</td><td>{p.status === "successful" ? <span className="badge badge-up">Оплачено</span> : <span className="badge badge-down">{p.message || "Отклонено"}</span>}</td><td className="r num">{byn(p.amount_kop)}</td></tr>)}
+          </tbody></table></div>
+        </section>
+      )}
+    </>
+  );
+}
+
+// ---------------------------------------------------------------- рефералка
+
+function Referral() {
+  const toast = useToast();
+  const { data, error, loading, reload } = useLoad(() => api.get<{ code: string; link: string; stats: { invited: number; active: number; rewarded: number }; friends: { name: string; created_at: number; active: boolean }[] }>("/referral"), []);
+  const [qr, setQr] = useState("");
+  useEffect(() => { if (data) QRCode.toDataURL(data.link, { margin: 1, width: 320 }).then(setQr); }, [data]);
+  if (loading && !data) return <PageLoader />;
+  if (error) return <LoadError error={error} retry={reload} />;
+  const d = data!;
+  const copy = () => { navigator.clipboard?.writeText(d.link); toast("Ссылка скопирована"); };
+  return (
+    <>
+      <section className="sheet">
+        <div className="sheet-head"><h2>Пригласить друга</h2></div>
+        <div className="sheet-body row g24 wrap" style={{ alignItems: "flex-start" }}>
+          <div className="stack g16 grow" style={{ minWidth: 260 }}>
+            <p>Когда друг зарегистрируется по вашей ссылке и сделает первое пополнение, вы оба получите месяц Pro.</p>
+            <div className="row g8"><Input readOnly value={d.link} onFocus={(e) => e.target.select()} aria-label="Ваша ссылка" /><Button icon={<Copy />} onClick={copy}>Копировать</Button></div>
+            <div className="row g8 wrap">
+              <a className="btn btn-secondary btn-sm" href={`https://t.me/share/url?url=${encodeURIComponent(d.link)}&text=${encodeURIComponent("Коплю в долларе и золоте через AutoInvest — попробуй, по моей ссылке месяц Pro бесплатно")}`} target="_blank" rel="noopener">Отправить в Telegram</a>
+            </div>
+          </div>
+          {qr && <img className="qr" src={qr} alt="QR-код ссылки-приглашения" />}
+        </div>
+      </section>
+      <section className="sheet">
+        <div className="sheet-head"><h2>Приглашённые</h2><span className="small muted">{d.stats.invited} зарегистрировались · {d.stats.active} начали копить</span></div>
+        {d.friends.length === 0 ? <div className="sheet-body small muted">Пока никого. Поделитесь ссылкой.</div> : (
+          <div className="list">{d.friends.map((f, i) => <div key={i} className="list-row"><div className="grow"><div className="title">{f.name}</div><div className="sub">{date(f.created_at)}</div></div>{f.active ? <span className="badge badge-up">Копит</span> : <span className="badge">Зарегистрирован</span>}</div>)}</div>
+        )}
+      </section>
+    </>
+  );
+}
+
+// ---------------------------------------------------------------- риск-профиль
+
+const QUIZ: [string, string[]][] = [
+  ["На какой срок вы готовы отложить эти деньги?", ["До года", "1–3 года", "3–5 лет", "Больше 5 лет"]],
+  ["Копилка подешевела на 30% за месяц. Что сделаете?", ["Выведу всё", "Поставлю на паузу", "Ничего не буду менять", "Пополню больше обычного"]],
+  ["Какая доля ваших сбережений пойдёт в копилки?", ["Больше половины", "Около половины", "Около четверти", "Меньше 10%"]],
+  ["Есть ли у вас запас на 3 месяца расходов?", ["Нет", "Почти", "Да", "Да, и больше"]],
+  ["Что для вас важнее?", ["Не потерять", "Обогнать инфляцию", "Заметный рост", "Максимальный рост"]],
+  ["Был ли у вас опыт с криптовалютой или акциями?", ["Нет", "Немного читал", "Покупал сам", "Регулярно инвестирую"]],
+];
+const PROFILE: Record<string, [string, string]> = {
+  conservative: ["Осторожный", "Подходят стратегии «Доллар» и «Резерв» — риск не выше 2 из 5."],
+  moderate: ["Умеренный", "Подходят стратегии до «Баланса» — риск до 3 из 5."],
+  aggressive: ["Готовый к риску", "Подходят любые стратегии, включая «Рост» и «Максимум»."],
+};
+
+function RiskQuiz() {
+  const { me, reload } = useSession();
+  const [ans, setAns] = useState<number[]>(Array(6).fill(0));
+  const [again, setAgain] = useState(false);
+  const s = useSubmit();
+  const current = me?.user?.risk_profile;
+  if (current && !again) {
+    const [t, d] = PROFILE[current];
+    return (
+      <section className="sheet">
+        <div className="sheet-head"><h2>Ваш риск-профиль</h2></div>
+        <div className="sheet-body stack g12"><div className="money-lg">{t}</div><p className="muted">{d}</p><div><Button size="sm" onClick={() => setAgain(true)}>Пройти заново</Button></div></div>
+      </section>
+    );
+  }
+  return (
+    <section className="sheet">
+      <div className="sheet-head"><h2>Анкета: какой риск вам подходит</h2><span className="small muted">6 вопросов</span></div>
+      <div className="sheet-body stack g24">
+        {QUIZ.map(([q, opts], i) => (
+          <fieldset key={i} style={{ border: 0, padding: 0, margin: 0 }}>
+            <legend style={{ fontWeight: 600, marginBottom: 8 }}>{q}</legend>
+            <div className="row g8 wrap">{opts.map((o, j) => <button key={j} type="button" className="chip" aria-pressed={ans[i] === j + 1} onClick={() => setAns(ans.map((a, k) => (k === i ? j + 1 : a)))}>{o}</button>)}</div>
+          </fieldset>
+        ))}
+        {s.error && <Notice kind="error">{s.error}</Notice>}
+        <div><Button variant="primary" disabled={ans.includes(0)} busy={s.busy} onClick={async () => { try { await s.submit(() => api.post("/me/risk", { answers: ans })); await reload(); setAgain(false); } catch { /* */ } }}>Узнать профиль</Button></div>
+      </div>
+    </section>
+  );
+}
+
+// KycBadge — статус верификации рядом с вкладкой: не пройдена → на проверке → подтверждена / отклонена.
+function KycBadge() {
+  const { me } = useSession();
+  const st = me?.user?.kyc_status || "none";
+  const [label, cls] = ({ none: ["не пройдена", ""], pending: ["на проверке", "badge-warn"], approved: ["подтверждена", "badge-up"], rejected: ["отклонена", "badge-down"] } as Record<string, [string, string]>)[st] || ["", ""];
+  return label ? <span className={`badge ${cls}`} style={{ marginLeft: 8 }}>{label}</span> : null;
+}

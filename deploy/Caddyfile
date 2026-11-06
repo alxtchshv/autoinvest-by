@@ -1,0 +1,8 @@
+# Замените домен. Caddy сам получит сертификат Let's Encrypt.
+autoinvest.by {
+	encode zstd gzip
+	reverse_proxy app:8080 {
+		# SSE: без буферизации, чтобы котировки шли в реальном времени
+		flush_interval -1
+	}
+}

@@ -1,0 +1,26 @@
+# данные и сборка
+/data/
+/bin/
+*.db
+*.db-wal
+*.db-shm
+/web/app/node_modules/
+/go.work
+/go.work.sum
+# секреты
+.env
+.env.*
+!.env.example
+# архив старой версии (бинарники и тестовая база)
+/_archive/
+# временное и системное
+*.log
+*.tmp
+*.out
+coverage*
+*.test
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea/
+.vscode/

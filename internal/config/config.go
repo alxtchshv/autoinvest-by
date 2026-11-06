@@ -1,0 +1,236 @@
+// Package config читает настройки сервиса из переменных окружения (и файла .env, если он есть).
+package config
+
+import (
+	"bufio"
+	"errors"
+	"fmt"
+	"os"
+	"strconv"
+	"strings"
+	"time"
+)
+
+// Режимы работы платёжного контура.
+const (
+	PaymentsSandbox = "sandbox" // встроенная тестовая платёжка, деньги не списываются
+	PaymentsBePaid  = "bepaid"  // реальный эквайринг bePaid (test=true или боевой)
+)
+
+// Режимы исполнения сделок.
+const (
+	BrokerPaper     = "paper"     // учебный счёт: сделки по реальным рыночным ценам, без реальной покупки
+	BrokerWhitebird = "whitebird" // партнёрский шлюз (нужен договор и ключи)
+)
+
+// Режимы рыночных данных.
+const (
+	MarketLive    = "live"    // Binance → Bybit → CoinGecko, курсы НБРБ
+	MarketFixture = "fixture" // только для разработки без интернета
+)
+
+type Config struct {
+	Addr          string
+	PublicURL     string // внешний адрес сайта, например https://autoinvest.by
+	DataDir       string
+	Env           string // development | production
+	SecureCookies bool
+
+	Payments        string
+	BePaidShopID    string
+	BePaidSecret    string
+	BePaidTest      bool
+	BePaidPublicKey string // PEM для проверки Content-Signature вебхуков (необязательно)
+
+	Broker          string
+	WhitebirdURL    string
+	WhitebirdKey    string
+	WhitebirdSecret string
+
+	Market     string
+	FinnhubKey string
+
+	TelegramToken    string
+	TelegramUsername string
+	SupportChatID    int64 // чат, куда бот пересылает новые обращения
+
+	SMTPHost string
+	SMTPPort int
+	SMTPUser string
+	SMTPPass string
+	SMTPFrom string
+
+	AdminEmail    string
+	AdminPassword string
+
+	RequireKYC     bool
+	FeeFreeBP      int64 // комиссия сервиса за покупку, базисные пункты (100 = 1%)
+	FeeProBP       int64
+	SpreadBP       int64 // спред партнёра к рыночной цене
+	ProMonthKop    int64
+	ProYearKop     int64
+	MinContribKop  int64
+	MaxContribKop  int64
+	FreePlanLimit  int
+	ProPlanLimit   int
+	SchedulerEvery time.Duration
+}
+
+// Load читает .env (если есть) и окружение.
+func Load() (*Config, error) {
+	loadDotEnv(".env")
+	c := &Config{
+		Addr:             env("ADDR", ":8080"),
+		PublicURL:        strings.TrimRight(env("PUBLIC_URL", "http://localhost:8080"), "/"),
+		DataDir:          env("DATA_DIR", "data"),
+		Env:              env("APP_ENV", "development"),
+		Payments:         env("PAYMENTS", PaymentsSandbox),
+		BePaidShopID:     env("BEPAID_SHOP_ID", ""),
+		BePaidSecret:     env("BEPAID_SECRET_KEY", ""),
+		BePaidTest:       envBool("BEPAID_TEST", true),
+		BePaidPublicKey:  env("BEPAID_PUBLIC_KEY", ""),
+		Broker:           env("BROKER", BrokerPaper),
+		WhitebirdURL:     env("WHITEBIRD_API_URL", ""),
+		WhitebirdKey:     env("WHITEBIRD_API_KEY", ""),
+		WhitebirdSecret:  env("WHITEBIRD_API_SECRET", ""),
+		Market:           env("MARKET", MarketLive),
+		FinnhubKey:       env("FINNHUB_API_KEY", ""),
+		TelegramToken:    env("TELEGRAM_BOT_TOKEN", ""),
+		TelegramUsername: strings.TrimPrefix(env("TELEGRAM_BOT_USERNAME", ""), "@"),
+		SupportChatID:    envInt64("TELEGRAM_SUPPORT_CHAT_ID", 0),
+		SMTPHost:         env("SMTP_HOST", ""),
+		SMTPPort:         int(envInt64("SMTP_PORT", 587)),
+		SMTPUser:         env("SMTP_USER", ""),
+		SMTPPass:         env("SMTP_PASSWORD", ""),
+		SMTPFrom:         env("SMTP_FROM", "AutoInvest <no-reply@autoinvest.by>"),
+		AdminEmail:       env("ADMIN_EMAIL", ""),
+		AdminPassword:    env("ADMIN_PASSWORD", ""),
+		RequireKYC:       envBool("REQUIRE_KYC", false),
+		FeeFreeBP:        envInt64("FEE_FREE_BP", 100),
+		FeeProBP:         envInt64("FEE_PRO_BP", 50),
+		SpreadBP:         envInt64("SPREAD_BP", 100),
+		ProMonthKop:      envInt64("PRO_MONTH_KOP", 990),
+		ProYearKop:       envInt64("PRO_YEAR_KOP", 8900),
+		MinContribKop:    envInt64("MIN_CONTRIBUTION_KOP", 500),
+		MaxContribKop:    envInt64("MAX_CONTRIBUTION_KOP", 500000),
+		FreePlanLimit:    int(envInt64("FREE_PLAN_LIMIT", 3)),
+		ProPlanLimit:     int(envInt64("PRO_PLAN_LIMIT", 20)),
+		SchedulerEvery:   time.Duration(envInt64("SCHEDULER_SECONDS", 30)) * time.Second,
+	}
+	c.SecureCookies = strings.HasPrefix(c.PublicURL, "https://")
+	return c, c.validate()
+}
+
+func (c *Config) validate() error {
+	switch c.Payments {
+	case PaymentsSandbox:
+	case PaymentsBePaid:
+		if c.BePaidShopID == "" || c.BePaidSecret == "" {
+			return errors.New("PAYMENTS=bepaid требует BEPAID_SHOP_ID и BEPAID_SECRET_KEY")
+		}
+	default:
+		return fmt.Errorf("неизвестный PAYMENTS=%q (sandbox|bepaid)", c.Payments)
+	}
+	switch c.Broker {
+	case BrokerPaper:
+	case BrokerWhitebird:
+		if c.WhitebirdURL == "" || c.WhitebirdKey == "" {
+			return errors.New("BROKER=whitebird требует WHITEBIRD_API_URL и WHITEBIRD_API_KEY")
+		}
+	default:
+		return fmt.Errorf("неизвестный BROKER=%q (paper|whitebird)", c.Broker)
+	}
+	// Защита от главной ошибки: брать реальные деньги и не покупать активы.
+	if c.LiveMoney() && c.Broker == BrokerPaper {
+		return errors.New("боевые платежи bePaid (BEPAID_TEST=false) нельзя включать с учебным исполнением BROKER=paper")
+	}
+	if c.Market != MarketLive && c.Market != MarketFixture {
+		return fmt.Errorf("неизвестный MARKET=%q (live|fixture)", c.Market)
+	}
+	if c.Env == "production" && c.Market == MarketFixture {
+		return errors.New("MARKET=fixture запрещён в production")
+	}
+	return nil
+}
+
+// LiveMoney — списываются ли реальные деньги.
+func (c *Config) LiveMoney() bool { return c.Payments == PaymentsBePaid && !c.BePaidTest }
+
+// Mode — человекочитаемый режим для интерфейса.
+func (c *Config) Mode() string {
+	switch {
+	case c.LiveMoney():
+		return "live"
+	case c.Payments == PaymentsBePaid:
+		return "bepaid_test"
+	default:
+		return "sandbox"
+	}
+}
+
+func env(k, def string) string {
+	if v, ok := os.LookupEnv(k); ok && strings.TrimSpace(v) != "" {
+		return strings.TrimSpace(v)
+	}
+	return def
+}
+
+func envBool(k string, def bool) bool {
+	v := strings.ToLower(env(k, ""))
+	switch v {
+	case "1", "true", "yes", "on":
+		return true
+	case "0", "false", "no", "off":
+		return false
+	}
+	return def
+}
+
+func envInt64(k string, def int64) int64 {
+	v := env(k, "")
+	if v == "" {
+		return def
+	}
+	n, err := strconv.ParseInt(v, 10, 64)
+	if err != nil {
+		return def
+	}
+	return n
+}
+
+// loadDotEnv выставляет переменные из файла, не перетирая уже заданные.
+func loadDotEnv(path string) {
+	f, err := os.Open(path)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	sc := bufio.NewScanner(f)
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		k, v, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+		k = strings.TrimSpace(k)
+		v = strings.TrimSpace(v)
+		if strings.HasPrefix(v, `"`) || strings.HasPrefix(v, "'") {
+			// значение в кавычках берём целиком, вместе с # внутри
+			q := v[:1]
+			if end := strings.Index(v[1:], q); end >= 0 {
+				v = v[1 : end+1]
+			}
+		} else if i := strings.Index(v, " #"); i >= 0 {
+			// комментарий после значения: PUBLIC_URL=http://localhost:8080  # пояснение
+			v = strings.TrimSpace(v[:i])
+		} else if i := strings.Index(v, "\t#"); i >= 0 {
+			v = strings.TrimSpace(v[:i])
+		}
+		if _, exists := os.LookupEnv(k); !exists {
+			os.Setenv(k, v)
+		}
+	}
+}

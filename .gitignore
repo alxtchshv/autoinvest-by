@@ -1,5 +1,7 @@
 # данные и сборка
 /data/
+/data-test/
+/backups/
 /bin/
 *.db
 *.db-wal

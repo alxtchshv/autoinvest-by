@@ -55,6 +55,24 @@ func (e *Engine) runDue(ctx context.Context) {
 	}
 }
 
+// ErrNotScheduled — у копилки нет расписания (пауза, закрыта или пополняется вручную).
+var ErrNotScheduled = errors.New("Копилка на паузе или пополняется вручную — включите её и выберите расписание")
+
+// RunScheduleNow выполняет ближайшее плановое пополнение сразу, тем же путём, что и планировщик:
+// триггер «по расписанию», учёт отказов, сдвиг следующего запуска. Только для тестового стенда —
+// чтобы проверить расписание, не дожидаясь пятницы.
+func (e *Engine) RunScheduleNow(ctx context.Context, planID int64) error {
+	res, err := e.DB.ExecContext(ctx, `UPDATE plans SET next_run_at=? WHERE id=? AND status='active' AND frequency!='manual'`, store.Now(), planID)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotScheduled
+	}
+	e.runPlan(ctx, planID)
+	return nil
+}
+
 func (e *Engine) runPlan(ctx context.Context, id int64) {
 	p, err := e.St.PlanByID(ctx, id)
 	if err != nil || p.NextRunAt == nil {

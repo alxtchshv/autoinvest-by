@@ -1,5 +1,5 @@
 # AutoInvest — команды для macOS и Linux (на Windows: run.bat, create_demo.bat, create_admin.bat)
-.PHONY: help run demo admin build web test vet fmt clean dev-web
+.PHONY: help run demo admin build web test vet fmt clean dev-web test-stand test-stand-reset
 
 help:           ## список команд
 	@grep -E '^[a-z-]+:.*## ' Makefile | sed 's/:.*## /\t— /'
@@ -19,6 +19,12 @@ demo:           ## демо-аккаунт demo@autoinvest.by / demo12345 (то�
 admin:          ## make admin EMAIL=you@mail.by PASS=пароль123
 	@test -n "$(EMAIL)" -a -n "$(PASS)" || { echo "Использование: make admin EMAIL=you@mail.by PASS=пароль123"; exit 2; }
 	./scripts/run.sh admin "$(EMAIL)" "$(PASS)"
+
+test-stand:     ## тестовый стенд с фейковыми деньгами на http://localhost:8090 (база data-test)
+	./scripts/test-stand.sh
+
+test-stand-reset: ## то же, но с чистой тестовой базой
+	./scripts/test-stand.sh reset
 
 test:           ## все тесты Go
 	go test ./internal/...

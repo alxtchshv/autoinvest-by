@@ -79,6 +79,12 @@ export default function PlanDetail() {
               <Button variant="primary" icon={<Plus />} onClick={() => setModal("topup")}>Пополнить</Button>
               <Button icon={<ArrowDownToLine />} onClick={() => setModal("withdraw")} disabled={v.value_kop <= 0}>Вывести</Button>
               <Button icon={p.status === "active" ? <Pause /> : <Play />} busy={act.busy} onClick={toggle}>{p.status === "active" ? "Пауза" : "Включить"}</Button>
+              {config?.mode === "sandbox" && config.broker === "paper" && p.status === "active" && p.frequency !== "manual" && (
+                <Button variant="ghost" busy={act.busy} title="Только на тестовом стенде" onClick={async () => {
+                  try { await act.submit(() => api.post(`/sandbox/plans/${p.id}/run-schedule`)); reload(); hist.reload(); toast("Плановое пополнение выполнено, следующее — по расписанию"); }
+                  catch (e: any) { toast(e.message, "error"); }
+                }}>Тест: пополнить по расписанию сейчас</Button>
+              )}
             </div>
           )}
         </div>
@@ -120,7 +126,7 @@ export default function PlanDetail() {
           <section className="sheet">
             <div className="sheet-head"><h2>Динамика</h2><Segmented label="Период" value={period} onChange={setPeriod} options={PERIODS.map((x) => ({ ...x }))} /></div>
             <div className="sheet-body">
-              {hist.data && hist.data.points.length > 2 ? <ValueChart points={hist.data.points} height={240} /> : <div className="muted small" style={{ padding: "36px 0", textAlign: "center" }}>График появится после первых пополнений.</div>}
+              {hist.data && hist.data.points.length >= 2 ? <ValueChart points={hist.data.points} height={240} /> : <div className="muted small" style={{ padding: "36px 0", textAlign: "center" }}>График появится после первого пополнения: стоимость записывается раз в час.</div>}
             </div>
           </section>
 

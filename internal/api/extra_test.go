@@ -1,6 +1,7 @@
 package api
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
@@ -203,5 +204,33 @@ func TestStaffNeeds2FAInProduction(t *testing.T) {
 	var e apiErr
 	if code := c.do("GET", "/api/v1/admin/metrics", nil, &e); code != 403 || e.Code != "staff_2fa_required" {
 		t.Fatalf("production without 2FA: %d %+v", code, e)
+	}
+}
+
+func TestSandboxRunScheduleExecutesPlannedTopup(t *testing.T) {
+	srv, s := newServer(t)
+	c := newClient(t, srv.URL)
+	c.register("run@test.by")
+	c.bindCard()
+	id := c.plan("Подушка", false)
+	if code := c.do("POST", fmt.Sprintf("/api/v1/sandbox/plans/%d/run-schedule", id), map[string]any{}, nil); code != 200 {
+		t.Fatalf("run-schedule: %d", code)
+	}
+	orders, _, _ := s.St.Orders(t.Context(), store.OrderFilter{PlanID: id})
+	if len(orders) != 1 || orders[0].Trigger != "schedule" || orders[0].Status != "filled" {
+		t.Fatalf("expected one filled scheduled order, got %+v", orders)
+	}
+	p, _ := s.St.PlanByID(t.Context(), id)
+	if p.NextRunAt == nil || *p.NextRunAt <= time.Now().Unix() {
+		t.Fatalf("next run must move to the future: %v", p.NextRunAt)
+	}
+	other := newClient(t, srv.URL)
+	other.register("other@test.by")
+	if code := other.do("POST", fmt.Sprintf("/api/v1/sandbox/plans/%d/run-schedule", id), map[string]any{}, nil); code != 404 {
+		t.Fatalf("another user must not run someone else's plan: %d", code)
+	}
+	s.Cfg.Broker = "whitebird"
+	if code := c.do("POST", fmt.Sprintf("/api/v1/sandbox/plans/%d/run-schedule", id), map[string]any{}, nil); code != 404 {
+		t.Fatalf("must be unavailable outside the test stand: %d", code)
 	}
 }

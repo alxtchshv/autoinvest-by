@@ -130,6 +130,7 @@ func (s *Server) routes(m *http.ServeMux) {
 	user("DELETE /api/v1/cards/{id}", s.deleteCard)
 	user("GET /api/v1/sandbox/checkout/{ref}", s.sandboxCheckout)
 	user("POST /api/v1/sandbox/checkout/{ref}", s.sandboxPay)
+	user("POST /api/v1/sandbox/plans/{id}/run-schedule", s.sandboxRunSchedule)
 	pub("GET /pay/return", s.payReturn)
 	pub("POST /api/v1/webhooks/bepaid", s.bepaidWebhook)
 

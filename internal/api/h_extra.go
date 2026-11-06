@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -285,4 +286,30 @@ func (s *Server) statement(w http.ResponseWriter, r *http.Request) {
 		"live_broker": s.Cfg.Broker == config.BrokerWhitebird,
 		"test_money":  !s.Cfg.LiveMoney(),
 	})
+}
+
+// sandboxRunSchedule — кнопка тестового стенда «выполнить плановое пополнение сейчас».
+// Работает только с тестовой платёжкой и учебным исполнением: с настоящими деньгами её нет.
+func (s *Server) sandboxRunSchedule(w http.ResponseWriter, r *http.Request) {
+	if s.Sandbox == nil || s.Cfg.Broker != config.BrokerPaper {
+		writeErr(w, http.StatusNotFound, "Доступно только на тестовом стенде")
+		return
+	}
+	p := s.loadPlan(w, r)
+	if p == nil {
+		return
+	}
+	if !s.limiter.Allow(fmt.Sprintf("sbxrun:%d", p.UserID), 30, time.Hour) {
+		writeErr(w, http.StatusTooManyRequests, "Слишком много запусков за час")
+		return
+	}
+	if err := s.En.RunScheduleNow(r.Context(), p.ID); err != nil {
+		if errors.Is(err, engine.ErrNotScheduled) {
+			writeErr(w, http.StatusConflict, err.Error())
+			return
+		}
+		s.internal(w, r, err)
+		return
+	}
+	s.getPlan(w, r)
 }

@@ -101,7 +101,7 @@ export default function Home() {
                 <Segmented label="Период" value={period} onChange={setPeriod} options={PERIODS.map((p) => ({ ...p }))} />
               </div>
               <div className="sheet-body">
-                {hist.data && hist.data.points.length > 2 ? <ValueChart points={hist.data.points} /> : <div className="muted small" style={{ padding: "40px 0", textAlign: "center" }}>График появится, когда накопится история — снимок стоимости записывается каждый час.</div>}
+                {hist.data && hist.data.points.length >= 2 ? <ValueChart points={hist.data.points} /> : <div className="muted small" style={{ padding: "40px 0", textAlign: "center" }}>График появится, когда накопится история — снимок стоимости записывается каждый час.</div>}
               </div>
             </section>
           )}

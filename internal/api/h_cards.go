@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -87,6 +88,9 @@ func (s *Server) pollBinding(r *http.Request, b *store.Binding) {
 }
 
 func (s *Server) completeBinding(r *http.Request, ref string, c payments.Card) {
+	if c.Issuer == "" {
+		c.Issuer = s.issuerByBIN(r.Context(), c.BIN)
+	}
 	card, err := s.St.FinishBinding(r.Context(), ref, &store.Card{Provider: s.Pay.Name(), Token: c.Token, Brand: c.Brand, Last4: c.Last4,
 		ExpMonth: c.ExpMonth, ExpYear: c.ExpYear, Holder: c.Holder, Issuer: c.Issuer, BIN: c.BIN}, "")
 	if err == nil && card != nil {
@@ -236,4 +240,24 @@ func (s *Server) sandboxPay(w http.ResponseWriter, r *http.Request) {
 	}
 	s.completeBinding(r, b.Ref, card)
 	writeJSON(w, 200, map[string]any{"status": "done", "redirect": "/app/cards?bind=" + b.Ref})
+}
+
+// issuerByBIN — запасной способ узнать банк карты, если эквайринг не прислал issuer_name. Ответы кэшируются.
+func (s *Server) issuerByBIN(ctx context.Context, bin string) string {
+	if s.Cfg.BinLookup == "off" || len(bin) != 6 {
+		return ""
+	}
+	key := "bin_issuer:" + bin
+	if v := s.St.GetKV(ctx, key); v != "" {
+		return v
+	}
+	c, cancel := context.WithTimeout(ctx, 4*time.Second)
+	defer cancel()
+	name, err := payments.BinList{}.Issuer(c, bin)
+	if err != nil || name == "" {
+		s.Log.Debug("банк по BIN не определён", "bin", bin, "err", err)
+		return ""
+	}
+	s.St.SetKV(ctx, key, name)
+	return name
 }

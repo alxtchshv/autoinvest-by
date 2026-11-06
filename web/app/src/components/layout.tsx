@@ -1,6 +1,6 @@
 import { Suspense, useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, NavLink, Navigate, Outlet, useLocation, useNavigate } from "react-router-dom";
-import { Menu, X, Bell, ChartCandlestick, CreditCard, Eye, EyeOff, History, House, LifeBuoy, PiggyBank, Calculator, Shield, LogOut, User } from "lucide-react";
+import { Menu, X, PanelLeftClose, PanelLeftOpen, Bell, ChartCandlestick, CreditCard, Eye, EyeOff, History, House, LifeBuoy, PiggyBank, Calculator, Shield, LogOut, User } from "lucide-react";
 import { api } from "../lib/api";
 import { ago, initials } from "../lib/format";
 import { useLoad } from "../lib/hooks";
@@ -43,29 +43,35 @@ const NAV = [
   { to: "/app/cards", label: "Карты", icon: CreditCard },
 ];
 
+const SIDE_KEY = "ai_side_collapsed";
+
 export function AppShell() {
-  const { me, config } = useSession();
-  const banner = config && (config.mode !== "live" || config.market_demo);
+  const { me } = useSession();
+  const [collapsed, setCollapsed] = useState(() => { try { return localStorage.getItem(SIDE_KEY) === "1"; } catch { return false; } });
+  const toggleSide = () => setCollapsed((c) => { try { localStorage.setItem(SIDE_KEY, c ? "0" : "1"); } catch { /* */ } return !c; });
+  const item = (to: string, label: string, Icon: typeof House, end?: boolean) => (
+    <NavLink key={to} to={to} end={end} title={collapsed ? label : undefined}><Icon /><span className="nav-label">{label}</span></NavLink>
+  );
   return (
     <MarketProvider userId={me?.user?.id ?? null}>
-      <ModeBanner />
-      <div className={`shell ${banner ? "has-banner" : ""}`}>
+      <div className={`shell ${collapsed ? "collapsed" : ""}`}>
         <aside className="side">
-          <Link to="/app" className="brand"><Logo />AutoInvest</Link>
+          <div className="side-top">
+            <Link to="/app" className="brand" title="AutoInvest"><Logo /><span className="nav-label">AutoInvest</span></Link>
+            <button className="side-toggle" onClick={toggleSide} aria-label={collapsed ? "Развернуть меню" : "Свернуть меню"} title={collapsed ? "Развернуть меню" : "Свернуть меню"}>
+              {collapsed ? <PanelLeftOpen /> : <PanelLeftClose />}
+            </button>
+          </div>
           <nav className="nav" aria-label="Разделы">
-            {NAV.map((n) => (
-              <NavLink key={n.to} to={n.to} end={n.end}>
-                <n.icon />{n.label}
-              </NavLink>
-            ))}
+            {NAV.map((n) => item(n.to, n.label, n.icon, n.end))}
             <div className="nav-sep" />
-            <NavLink to="/app/support"><LifeBuoy />Поддержка</NavLink>
-            {me?.user && me.user.role !== "user" && <NavLink to="/admin"><Shield />Админка</NavLink>}
+            {item("/app/support", "Поддержка", LifeBuoy)}
+            {me?.user && me.user.role !== "user" && item("/admin", "Админка", Shield)}
           </nav>
           <div className="side-foot">
-            <NavLink to="/app/profile" className="side-user">
+            <NavLink to="/app/profile" className="side-user" title={collapsed ? (me?.user?.name || "Профиль") : undefined}>
               <span className="avatar">{initials(me?.user?.name || "")}</span>
-              <span className="grow" style={{ minWidth: 0 }}>
+              <span className="grow nav-label" style={{ minWidth: 0 }}>
                 <div style={{ fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{me?.user?.name}</div>
                 <div className="tiny muted">{me?.is_pro ? "Тариф Pro" : "Тариф Старт"}</div>
               </span>
@@ -73,6 +79,7 @@ export function AppShell() {
           </div>
         </aside>
         <div className="main">
+          <ModeBanner />
           <TopBar />
           <main className="content" id="main">
             <Suspense fallback={<PageLoader />}><Outlet /></Suspense>
@@ -172,7 +179,7 @@ function SectionLink({ id, children, onClick }: { id: string; children: ReactNod
   );
 }
 
-const SITE_LINKS: [string, string][] = [["how", "Как это работает"], ["strategies", "Стратегии"], ["calc", "Калькулятор"], ["pricing", "Тарифы"], ["faq", "Вопросы"]];
+const SITE_LINKS: [string, string][] = [["how", "Как это работает"], ["strategies", "Планы"], ["calc", "Калькулятор"], ["pricing", "Тарифы"], ["faq", "Вопросы"]];
 
 export function PublicLayout() {
   const { me } = useSession();
@@ -233,7 +240,7 @@ function SiteFooter() {
           <div>
             <h4>Сервис</h4>
             <SectionLink id="how">Как это работает</SectionLink>
-            <SectionLink id="strategies">Стратегии</SectionLink>
+            <SectionLink id="strategies">Планы</SectionLink>
             <Link to="/calculator">Калькулятор</Link>
             <SectionLink id="pricing">Тарифы</SectionLink>
           </div>

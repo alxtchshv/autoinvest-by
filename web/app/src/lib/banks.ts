@@ -1,0 +1,29 @@
+// Банки Беларуси для оформления карт. Название приходит от эквайринга (или из справочника BIN),
+// здесь только узнаём банк по названию и подбираем фирменный цвет и значок.
+// Настоящий логотип банка можно положить в public/banks/<id>.svg — карта подхватит его сама.
+
+export type Bank = { id: string; name: string; short: string; color: string; color2: string; match: RegExp };
+
+export const BANKS: Bank[] = [
+  { id: "belarusbank", name: "Беларусбанк", short: "ББ", color: "#0b7a3e", color2: "#05532a", match: /беларусбанк|belarusbank|asb/i },
+  { id: "priorbank", name: "Приорбанк", short: "П", color: "#26262b", color2: "#0f0f12", match: /приор|prior/i },
+  { id: "alfabank", name: "Альфа-Банк", short: "А", color: "#ef3124", color2: "#b5170d", match: /альфа|alfa/i },
+  { id: "belagroprombank", name: "Белагропромбанк", short: "БАП", color: "#12844a", color2: "#0a5a31", match: /белагро|belagroprom/i },
+  { id: "belinvestbank", name: "Белинвестбанк", short: "БИБ", color: "#0b5aa6", color2: "#063d73", match: /белинвест|belinvest/i },
+  { id: "bnb", name: "БНБ-Банк", short: "БНБ", color: "#0d2e6b", color2: "#071b42", match: /бнб|bnb/i },
+  { id: "belveb", name: "Банк БелВЭБ", short: "ВЭБ", color: "#1c4e9c", color2: "#0f3168", match: /белвэб|belveb|бвэб/i },
+  { id: "mtbank", name: "МТБанк", short: "МТ", color: "#e2442f", color2: "#a92a18", match: /мтбанк|mtbank|мт банк/i },
+  { id: "dabrabyt", name: "Банк Дабрабыт", short: "Д", color: "#0095d5", color2: "#00649a", match: /дабрабыт|dabrabyt/i },
+  { id: "belgazprombank", name: "Белгазпромбанк", short: "БГП", color: "#0a5bb5", color2: "#063c79", match: /белгазпром|belgazprom/i },
+  { id: "bsb", name: "БСБ Банк", short: "БСБ", color: "#003b6f", color2: "#00244a", match: /бсб|bsb/i },
+  { id: "sber", name: "Сбер Банк", short: "С", color: "#1a9f3a", color2: "#0d6b25", match: /сбер|sber/i },
+  { id: "paritet", name: "Паритетбанк", short: "ПБ", color: "#7a1f5c", color2: "#4f123b", match: /паритет|paritet/i },
+  { id: "technobank", name: "Технобанк", short: "Т", color: "#2d3a8c", color2: "#1b245c", match: /технобанк|technobank/i },
+  { id: "statusbank", name: "Статусбанк", short: "СБ", color: "#4a4f5a", color2: "#2b2e35", match: /статусбанк|statusbank/i },
+];
+
+export function findBank(issuer: string): Bank | null {
+  const s = issuer.trim();
+  if (!s) return null;
+  return BANKS.find((b) => b.match.test(s)) || null;
+}

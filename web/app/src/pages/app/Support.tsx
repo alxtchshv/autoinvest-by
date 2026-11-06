@@ -6,7 +6,7 @@ import { ago, dateTime } from "../../lib/format";
 import { useLoad, useSubmit, useTitle } from "../../lib/hooks";
 import { useSession, useUserEvent } from "../../lib/session";
 import type { Ticket } from "../../lib/types";
-import { Button, Empty, Field, Input, LoadError, Modal, Notice, PageLoader, useToast } from "../../components/ui";
+import { Accordion, Button, Empty, Field, Input, LoadError, Modal, Notice, PageLoader, useToast } from "../../components/ui";
 
 const HELP: [string, string][] = [
   ["Когда спишутся деньги?", "В день и время, указанные в расписании копилки (по Минску). За минуту до этого вы можете поставить копилку на паузу — списания не будет."],
@@ -52,8 +52,8 @@ export function Support() {
         </section>
         <section className="sheet">
           <div className="sheet-head"><h2>Частые вопросы</h2></div>
-          <div className="sheet-body faq" style={{ paddingTop: 4 }}>
-            {HELP.map(([q, a]) => <details key={q}><summary style={{ fontSize: 15 }}>{q}</summary><p className="small">{a}</p></details>)}
+          <div className="sheet-body faq-compact" style={{ paddingTop: 0, paddingBottom: 0 }}>
+            <Accordion items={HELP} first={null} />
           </div>
           <div className="sheet-foot small muted">Почта: support@autoinvest.by</div>
         </section>

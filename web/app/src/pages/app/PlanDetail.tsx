@@ -1,12 +1,14 @@
 import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { ArrowDownToLine, ArrowLeft, Pause, Pencil, Play, Plus, SlidersHorizontal, Trash2 } from "lucide-react";
+import { ArrowDownToLine, ArrowLeft, FlaskConical, Pause, Pencil, Play, Plus, SlidersHorizontal, Trash2 } from "lucide-react";
 import { api, idemKey } from "../../lib/api";
-import { byn, date, dateTime, kop, parseKop, pct, price, qty, scheduleText, when } from "../../lib/format";
+import { byn, date, dateTime, kop, parseKop, pct, planName, price, qty, scheduleText, when } from "../../lib/format";
 import { useLoad, useSubmit, useTitle } from "../../lib/hooks";
 import { useSession, useUserEvent } from "../../lib/session";
 import type { Alloc, Card, Order, Plan, Snapshot } from "../../lib/types";
-import { AssetIcon, Button, Change, Field, Input, LoadError, Modal, Money, Notice, OrderStatus, PageLoader, PLAN_ICONS, PlanIcon, PlanStatus, RiskDots, riskLabel, Segmented, Switch, useToast } from "../../components/ui";
+import { AssetIcon, Button, Change, Field, Input, LoadError, Modal, MoreMenu, Money, Notice, OrderStatus, PageLoader, PLAN_ICONS, PlanIcon, PlanStatus, Segmented, Switch, useToast } from "../../components/ui";
+import { PlanMark, RISK_TEXT } from "../../components/plans";
+import { DatePicker } from "../../components/DatePicker";
 import { ValueChart } from "../../components/charts";
 import { SchedulePicker, StrategyPicker, type Schedule } from "./PlanNew";
 import { AllocBar } from "./Plans";
@@ -62,29 +64,34 @@ export default function PlanDetail() {
     }
   };
   const closed = p.status === "closed";
+  const st = config?.strategies.find((x) => x.id === p.strategy);
+  const sandboxRun = config?.mode === "sandbox" && config.broker === "paper" && p.status === "active" && p.frequency !== "manual";
+  const goalDone = p.goal_progress_bp >= 10000;
+  const late = !!(p.goal_eta && p.goal_date && p.goal_eta > p.goal_date);
   return (
-    <div className="stack g16">
+    <div className="pd stack g16">
       <div>
         <Link to="/app/plans" className="back"><ArrowLeft />Копилки</Link>
-        <div className="page-head" style={{ marginBottom: 0 }}>
-          <div className="row g16">
-            <PlanIcon icon={p.icon} />
-            <div>
-              <div className="row g12 wrap"><h1>{p.name}</h1><PlanStatus s={p.status} /></div>
-              <p>{p.frequency === "manual" ? "Пополнение вручную" : `${byn(p.amount_kop)} ${scheduleText(p)}`}{p.card ? ` · карта •• ${p.card.last4}` : ""}</p>
-            </div>
+        <div className="pd-head">
+          <PlanIcon icon={p.icon} />
+          <div className="pd-title">
+            <div className="row g12 wrap"><h1>{p.name}</h1><PlanStatus s={p.status} /></div>
+            <p>{p.frequency === "manual" ? "Пополнение вручную" : `${byn(p.amount_kop)} ${scheduleText(p)}`}{p.card ? ` · карта •• ${p.card.last4}` : ""}</p>
           </div>
           {!closed && (
-            <div className="row g8 wrap">
+            <div className="pd-actions">
               <Button variant="primary" icon={<Plus />} onClick={() => setModal("topup")}>Пополнить</Button>
               <Button icon={<ArrowDownToLine />} onClick={() => setModal("withdraw")} disabled={v.value_kop <= 0}>Вывести</Button>
-              <Button icon={p.status === "active" ? <Pause /> : <Play />} busy={act.busy} onClick={toggle}>{p.status === "active" ? "Пауза" : "Включить"}</Button>
-              {config?.mode === "sandbox" && config.broker === "paper" && p.status === "active" && p.frequency !== "manual" && (
-                <Button variant="ghost" busy={act.busy} title="Только на тестовом стенде" onClick={async () => {
+              <MoreMenu items={[
+                { label: p.status === "active" ? "Поставить на паузу" : "Включить пополнения", icon: p.status === "active" ? <Pause /> : <Play />, onClick: toggle },
+                { label: "Сумма и расписание", icon: <Pencil />, onClick: () => setModal("edit") },
+                { label: "Изменить план", icon: <SlidersHorizontal />, onClick: () => setModal("mix") },
+                ...(sandboxRun ? [{ label: "Тест: пополнить по расписанию сейчас", icon: <FlaskConical />, onClick: async () => {
                   try { await act.submit(() => api.post(`/sandbox/plans/${p.id}/run-schedule`)); reload(); hist.reload(); toast("Плановое пополнение выполнено, следующее — по расписанию"); }
                   catch (e: any) { toast(e.message, "error"); }
-                }}>Тест: пополнить по расписанию сейчас</Button>
-              )}
+                } }] : []),
+                { label: "Закрыть копилку", icon: <Trash2 />, danger: true, onClick: () => setModal("close") },
+              ]} />
             </div>
           )}
         </div>
@@ -93,94 +100,92 @@ export default function PlanDetail() {
       {p.status === "paused" && !p.card && <Notice kind="warn">У копилки нет карты. <Link to="/app/cards">Привяжите карту</Link>, затем включите копилку.</Notice>}
       {p.fail_count > 0 && p.status === "active" && <Notice kind="warn">Последнее списание не прошло ({p.fail_count} подряд). После трёх отказов копилка встанет на паузу — проверьте баланс карты.</Notice>}
 
-      <div className="home-grid">
-        <div className="stack g16">
-          <section className="sheet sheet-pad">
-            <div className="plan-hero">
-              <div>
-                <div className="muted small">Стоимость сейчас</div>
-                <Money k={v.value_kop} size="xl" />
-                {v.invested_kop > 0 && (
-                  <div className="row g12 wrap mt8 small">
-                    <span className={`badge ${v.pnl_kop >= 0 ? "badge-up" : "badge-down"}`}>{byn(v.pnl_kop, { sign: true })} · {pct(v.pnl_pct)}</span>
-                    <span className="muted">вложено {byn(v.invested_kop)}</span>
-                  </div>
-                )}
-              </div>
+      <section className={`sheet pd-hero ${p.goal_kop ? "with-goal" : ""}`}>
+        <div className="pd-value">
+          <div className="muted">Стоимость сейчас</div>
+          <Money k={v.value_kop} size="xl" />
+          {v.invested_kop > 0 && (
+            <div className="pd-pnl">
+              <span className={v.pnl_kop >= 0 ? "up" : "down"}><Change k={v.pnl_kop} /> ({pct(v.pnl_pct)})</span>
+              <span className="muted">вложено <Money k={v.invested_kop} /></span>
             </div>
-            {p.goal_kop ? (
-              <div className="mt24">
-                <div className="row between small"><b>Цель {byn(p.goal_kop)}</b><span className="muted">{(p.goal_progress_bp / 100).toFixed(1).replace(".", ",")}%</span></div>
-                <div className="bar mt8"><span style={{ width: p.goal_progress_bp / 100 + "%" }} /></div>
-                <div className="goal-line">
-                  <span>{p.goal_progress_bp >= 10000 ? "Цель достигнута" : p.goal_eta ? `При текущем темпе — к ${date(new Date(p.goal_eta).getTime() / 1000)}` : "Включите пополнения, чтобы увидеть прогноз"}</span>
-                  {p.goal_date && <span>Срок: {date(new Date(p.goal_date).getTime() / 1000)}</span>}
-                </div>
-                {p.goal_need_kop && p.goal_need_kop > p.amount_kop && p.goal_progress_bp < 10000 && (
-                  <div className="small mt8">Чтобы успеть к сроку, пополняйте по <b>{byn(p.goal_need_kop)}</b>. <button className="link-btn" onClick={() => setModal("edit")}>Изменить сумму</button></div>
-                )}
-              </div>
-            ) : null}
-          </section>
-
-          <section className="sheet">
-            <div className="sheet-head"><h2>Динамика</h2><Segmented label="Период" value={period} onChange={setPeriod} options={PERIODS.map((x) => ({ ...x }))} /></div>
-            <div className="sheet-body">
-              {hist.data && hist.data.points.length >= 2 ? <ValueChart points={hist.data.points} height={240} /> : <div className="muted small" style={{ padding: "36px 0", textAlign: "center" }}>График появится после первого пополнения: стоимость записывается раз в час.</div>}
-            </div>
-          </section>
-
-          <section className="sheet">
-            <div className="sheet-head"><h2>Активы</h2>{!closed && <Button size="sm" variant="ghost" icon={<SlidersHorizontal />} onClick={() => setModal("mix")}>Изменить состав</Button>}</div>
-            {v.positions.length === 0 ? (
-              <div className="sheet-body"><AllocBar plan={p} /><div className="small muted mt8">{p.allocations.map((a) => `${a.asset} ${a.weight_bp / 100}%`).join(" · ")} — активы появятся после первого пополнения</div></div>
-            ) : (
-              <div className="table-wrap">
-                <table className="table">
-                  <thead><tr><th>Актив</th><th className="r">Количество</th><th className="r">Цена</th><th className="r">Стоимость</th><th className="r">Доход</th></tr></thead>
-                  <tbody>
-                    {v.positions.map((x) => {
-                      const a = config?.assets.find((s) => s.symbol === x.asset);
-                      const pnl = x.value_kop - x.cost_kop;
-                      return (
-                        <tr key={x.asset} className="click" onClick={() => nav(`/app/market/${x.asset}`)}>
-                          <td><span className="row g12"><AssetIcon symbol={x.asset} size="sm" /><span><div style={{ fontWeight: 560 }}>{a?.name}</div><div className="tiny muted">{(p.allocations.find((al) => al.asset === x.asset)?.weight_bp || 0) / 100}% пополнений</div></span></span></td>
-                          <td className="r num">{qty(x.qty, x.asset)}</td>
-                          <td className="r num">{price(x.price_byn)}<div className="tiny"><Change v={x.change_24h} /></div></td>
-                          <td className="r"><Money k={x.value_kop} /></td>
-                          <td className="r"><Change k={pnl} /><div className="tiny"><Change v={x.cost_kop ? (pnl / x.cost_kop) * 100 : 0} /></div></td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </section>
-        </div>
-
-        <div className="stack g16">
-          {!closed && (
-            <section className="sheet">
-              <div className="sheet-head"><h2>Расписание</h2><Button size="sm" variant="ghost" icon={<Pencil />} onClick={() => setModal("edit")}>Изменить</Button></div>
-              <div className="sheet-body stack g12">
-                {p.status === "active" && p.next_runs.length ? (
-                  p.next_runs.map((t, i) => <div key={t} className="row between"><span className={i ? "muted" : ""}>{when(t)}</span><Money k={p.amount_kop} /></div>)
-                ) : <div className="muted small">{p.frequency === "manual" ? "Пополнения только вручную" : "Копилка на паузе"}</div>}
-                <div className="divider" style={{ margin: "4px 0" }} />
-                <div className="row between small"><span className="muted">В месяц</span><Money k={p.monthly_kop} /></div>
-                <div className="row between small"><span className="muted">Риск</span><span className="row g8"><RiskDots risk={p.risk} />{riskLabel(p.risk)}</span></div>
-                {p.dip_enabled && <div className="row between small"><span className="muted">Докупка на просадке</span><span>при −{p.dip_threshold_bp / 100}% за сутки</span></div>}
-              </div>
-            </section>
           )}
-          <section className="sheet">
-            <div className="sheet-head"><h2>Операции</h2><Link to={`/app/history?plan=${p.id}`} className="small">Все</Link></div>
-            {data!.operations.length ? <div className="list">{data!.operations.slice(0, 8).map((o) => <OperationRow key={o.id} o={o} />)}</div> : <div className="sheet-body small muted">Операций пока не было.</div>}
-          </section>
-          {!closed && <Button variant="danger" icon={<Trash2 />} onClick={() => setModal("close")}>Закрыть копилку</Button>}
         </div>
+        {p.goal_kop ? (
+          <div className="pd-goal">
+            <div className="row between"><span className="muted">Цель</span><b className="num">{(p.goal_progress_bp / 100).toFixed(1).replace(".", ",").replace(",0", "")}%</b></div>
+            <div className="pd-goal-sum num">{byn(p.goal_kop).replace(",00", "")}</div>
+            <div className="bar"><span style={{ width: p.goal_progress_bp / 100 + "%" }} /></div>
+            <div className="pd-goal-line">
+              {goalDone ? <span className="up">Цель достигнута</span>
+                : p.goal_eta ? <span>Прогноз: <b>{date(new Date(p.goal_eta).getTime() / 1000)}</b></span>
+                : p.status === "active" && p.frequency !== "manual" ? <span>С этой суммой цель займёт больше 30 лет</span>
+                : <span className="muted">Включите пополнения, чтобы увидеть прогноз</span>}
+              {p.goal_date && <span className="muted">Срок: {date(new Date(p.goal_date).getTime() / 1000)}</span>}
+            </div>
+            {!goalDone && p.goal_need_kop && p.goal_need_kop > p.amount_kop && (
+              <div className={`pd-goal-hint ${late ? "warn" : ""}`}>Чтобы успеть к сроку, пополняйте по <b>{byn(p.goal_need_kop)}</b>. <button className="link-btn" onClick={() => setModal("edit")}>Изменить сумму</button></div>
+            )}
+          </div>
+        ) : null}
+      </section>
+
+      <div className="pd-grid">
+        <section className="sheet">
+          <div className="sheet-head"><h2>Динамика</h2><Segmented label="Период" value={period} onChange={setPeriod} options={PERIODS.map((x) => ({ ...x }))} /></div>
+          <div className="sheet-body">
+            {hist.data && hist.data.points.length >= 2 ? <ValueChart points={hist.data.points} height={260} /> : <div className="muted" style={{ padding: "48px 0", textAlign: "center" }}>График появится после первого пополнения: стоимость записывается раз в час.</div>}
+          </div>
+        </section>
+        <section className="sheet pd-side">
+          <div className="sheet-head"><h2>Пополнения</h2>{!closed && <Button size="sm" variant="ghost" icon={<Pencil />} onClick={() => setModal("edit")}>Изменить</Button>}</div>
+          <div className="sheet-body stack g12">
+            {p.status === "active" && p.next_runs.length ? (
+              p.next_runs.map((t, i) => <div key={t} className={`pd-run ${i ? "muted" : ""}`}><span>{when(t)}</span><Money k={p.amount_kop} /></div>)
+            ) : <div className="muted">{closed ? "Копилка закрыта" : p.frequency === "manual" ? "Пополнения только вручную" : "Копилка на паузе"}</div>}
+            {p.frequency !== "manual" && !closed && <div className="pd-run pd-month"><span className="muted">В месяц около</span><Money k={p.monthly_kop} /></div>}
+            <div className="pd-plan">
+              {st ? <PlanMark id={st.id} size={32} /> : <span className="plan-mark" />}
+              <div className="grow"><div className="pd-plan-name">{st ? planName(st.name) : "Свой состав"}</div><div className={`pt-risk r${p.risk}`}>{RISK_TEXT[p.risk]}</div></div>
+              {!closed && <button className="link-btn" onClick={() => setModal("mix")}>Сменить</button>}
+            </div>
+            {p.dip_enabled && <div className="small muted">Докупка при падении на {p.dip_threshold_bp / 100}% за сутки</div>}
+          </div>
+        </section>
       </div>
+
+      <section className="sheet">
+        <div className="sheet-head"><h2>Активы</h2></div>
+        {v.positions.length === 0 ? (
+          <div className="sheet-body"><AllocBar plan={p} /><div className="muted mt8">{p.allocations.map((a) => `${config?.assets.find((x) => x.symbol === a.asset)?.name || a.asset} ${a.weight_bp / 100}%`).join(" · ")} — активы появятся после первого пополнения</div></div>
+        ) : (
+          <div className="table-wrap">
+            <table className="table pd-table">
+              <thead><tr><th>Актив</th><th className="r">Количество</th><th className="r">Цена</th><th className="r">Стоимость</th><th className="r">Доход</th></tr></thead>
+              <tbody>
+                {v.positions.map((x) => {
+                  const a = config?.assets.find((s) => s.symbol === x.asset);
+                  const pnl = x.value_kop - x.cost_kop;
+                  return (
+                    <tr key={x.asset} className="click" onClick={() => nav(`/app/market/${x.asset}`)}>
+                      <td><span className="row g12"><AssetIcon symbol={x.asset} /><span><div style={{ fontWeight: 600 }}>{a?.name}</div><div className="small muted">{(p.allocations.find((al) => al.asset === x.asset)?.weight_bp || 0) / 100}% пополнений</div></span></span></td>
+                      <td className="r num">{qty(x.qty, x.asset)}</td>
+                      <td className="r num">{price(x.price_byn)}<div className="small"><Change v={x.change_24h} /></div></td>
+                      <td className="r"><b><Money k={x.value_kop} /></b></td>
+                      <td className="r"><Change k={pnl} /><div className="small"><Change v={x.cost_kop ? (pnl / x.cost_kop) * 100 : 0} /></div></td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+
+      <section className="sheet">
+        <div className="sheet-head"><h2>Операции</h2><Link to={`/app/history?plan=${p.id}`}>Все операции</Link></div>
+        {data!.operations.length ? <div className="list">{data!.operations.slice(0, 5).map((o) => <OperationRow key={o.id} o={o} />)}</div> : <div className="sheet-body muted">Операций пока не было.</div>}
+      </section>
 
       <TopupModal plan={p} open={modal === "topup"} onClose={() => setModal(null)} onDone={refresh} />
       <WithdrawModal plan={p} open={modal === "withdraw"} onClose={() => setModal(null)} onDone={refresh} />
@@ -215,9 +220,9 @@ function TopupModal({ plan, open, onClose, onDone }: MP) {
         } catch { /* */ }
       }}>
         <Field label="Сумма" error={s.fieldError("amount_kop") || (!s.field ? s.error : null)}>
-          <div className="input-affix"><input className="input amount-input" inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} autoFocus aria-label="Сумма" /><span className="affix" style={{ fontSize: 18 }}>⃅</span></div>
+          <div className="input-affix"><input className="input amount-input" inputMode="decimal" maxLength={10} value={amount} onChange={(e) => setAmount(e.target.value)} autoFocus aria-label="Сумма" /><span className="affix" style={{ fontSize: 18 }}>⃅</span></div>
         </Field>
-        <div className="small muted">Спишем с карты •• {plan.card?.last4 || "—"} и купим {plan.allocations.map((a) => `${a.asset} ${a.weight_bp / 100}%`).join(", ")} по текущей цене. Комиссия сервиса ≈ {byn(fee)}.</div>
+        <div className="small muted">Спишем с карты •• {plan.card?.last4 || "—"} и купим активы по плану по текущей цене. Комиссия сервиса ≈ {byn(fee)}.</div>
         <Button type="submit" variant="primary" size="lg" block busy={s.busy} disabled={!isFinite(k) || !plan.card}>Пополнить на {isFinite(k) ? byn(k) : "…"}</Button>
       </form>
     </Modal>
@@ -248,7 +253,7 @@ function WithdrawModal({ plan, open, onClose, onDone }: MP) {
         <Segmented label="Сколько" value={all ? "all" : "part"} onChange={(x) => setAll(x === "all")} options={[{ value: "part", label: "Часть" }, { value: "all", label: "Всё" }]} />
         {!all && (
           <Field label="Сумма" error={s.fieldError("amount_kop")}>
-            <div className="input-affix"><input className="input amount-input" inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} autoFocus aria-label="Сумма" placeholder="0" /><span className="affix" style={{ fontSize: 18 }}>⃅</span></div>
+            <div className="input-affix"><input className="input amount-input" inputMode="decimal" maxLength={10} value={amount} onChange={(e) => setAmount(e.target.value)} autoFocus aria-label="Сумма" placeholder="0" /><span className="affix" style={{ fontSize: 18 }}>⃅</span></div>
           </Field>
         )}
         <Field label="Пароль от аккаунта" error={s.fieldError("password")} hint="Подтверждаем вывод, чтобы деньги не увёл тот, кто получил доступ к вашему устройству">
@@ -289,10 +294,10 @@ function EditModal({ plan, open, onClose, onDone }: MP) {
         <Field label="Название"><Input value={name} maxLength={40} onChange={(e) => setName(e.target.value)} /></Field>
         <div className="icon-pick">{Object.entries(PLAN_ICONS).map(([k, I]) => <button key={k} type="button" aria-pressed={icon === k} aria-label={k} onClick={() => setIcon(k)}><I /></button>)}</div>
         <div className="grid2">
-          <Field label="Цель, ⃅" hint="Пусто — без цели"><Input inputMode="decimal" value={goal} onChange={(e) => setGoal(e.target.value)} /></Field>
-          <Field label="Срок"><Input type="date" value={goalDate} onChange={(e) => setGoalDate(e.target.value)} /></Field>
+          <Field label="Цель, ⃅" hint="Пусто — без цели"><Input inputMode="decimal" maxLength={12} value={goal} onChange={(e) => setGoal(e.target.value)} /></Field>
+          <Field label="Срок"><DatePicker value={goalDate} onChange={setGoalDate} min={new Date(Date.now() + 86400000).toISOString().slice(0, 10)} placeholder="Без срока" /></Field>
         </div>
-        <Field label="Сумма пополнения, ⃅"><Input inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} /></Field>
+        <Field label="Сумма пополнения, ⃅"><Input inputMode="decimal" maxLength={10} value={amount} onChange={(e) => setAmount(e.target.value)} /></Field>
         <SchedulePicker value={sched} onChange={setSched} />
         {!!cards.data?.cards.length && (
           <Field label="Карта">

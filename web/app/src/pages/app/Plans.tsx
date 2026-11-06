@@ -75,7 +75,7 @@ export default function Plans() {
           {data && <p>{open} из {data.limit} · всего <Money k={total} /></p>}
         </div>
         <div className="row g8 wrap">
-          <Link to="/app/onboarding" className="btn btn-secondary">Подобрать стратегию</Link>
+          <Link to="/app/onboarding" className="btn btn-secondary">Подобрать план</Link>
           <Link to="/app/plans/new" className="btn btn-primary"><Plus />Новая копилка</Link>
         </div>
       </div>

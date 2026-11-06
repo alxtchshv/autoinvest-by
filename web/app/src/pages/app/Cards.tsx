@@ -6,12 +6,24 @@ import { brandLabel } from "../../lib/format";
 import { useLoad, useSubmit, useTitle } from "../../lib/hooks";
 import { useSession } from "../../lib/session";
 import type { Card } from "../../lib/types";
+import { findBank, type Bank } from "../../lib/banks";
 import { Button, Empty, LoadError, Modal, Notice, PageLoader, useToast } from "../../components/ui";
 
+function BankLogo({ bank, issuer }: { bank: Bank | null; issuer: string }) {
+  const [img, setImg] = useState(true);
+  if (bank && img) return <img className="bc-logo" src={`/banks/${bank.id}.svg`} alt="" onError={() => setImg(false)} />;
+  return <span className="bc-mono">{bank ? bank.short : (issuer.trim()[0] || "•").toUpperCase()}</span>;
+}
+
 export function BankCard({ c }: { c: Card }) {
+  const bank = findBank(c.issuer);
+  const style = bank ? { background: `linear-gradient(135deg, ${bank.color} 0%, ${bank.color2} 100%)` } : undefined;
   return (
-    <div className={`bank-card ${c.brand.toLowerCase()}`}>
-      <div className="row between"><span className="chip-ic" /><span className="small" style={{ opacity: .8 }}>{c.issuer}</span></div>
+    <div className={`bank-card ${bank ? "branded" : c.brand.toLowerCase()}`} style={style}>
+      <div className="row between">
+        <span className="bc-bank"><BankLogo bank={bank} issuer={c.issuer} /><span>{bank?.name || c.issuer || "Банк карты"}</span></span>
+        <span className="chip-ic" />
+      </div>
       <div className="bc-num">{c.mask || `•••• •••• •••• ${c.last4}`}</div>
       <div className="bc-row">
         <span>{c.holder || "—"}<br />{String(c.exp_month).padStart(2, "0")}/{String(c.exp_year).slice(-2)}</span>

@@ -57,7 +57,7 @@ export default function Home() {
       </div>
 
       {!me?.user?.onboarded_at && (
-        <Notice kind="info" title="Подберём копилку за 4 вопроса">Ответьте, сколько готовы откладывать и как относитесь к риску, — предложим состав и создадим копилку в один клик. <Link to="/app/onboarding">Подобрать стратегию</Link></Notice>
+        <Notice kind="info" title="Подберём копилку за 4 вопроса">Ответьте, сколько готовы откладывать и как относитесь к риску, — предложим состав и создадим копилку в один клик. <Link to="/app/onboarding">Подобрать план</Link></Notice>
       )}
       {!me?.cards && <Notice kind="warn" title="Привяжите карту">Без карты копилки не смогут пополняться. <Link to="/app/cards">Привязать карту</Link></Notice>}
       {config?.require_kyc && me?.user?.kyc_status !== "approved" && (

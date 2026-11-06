@@ -221,7 +221,7 @@ function Security() {
     "plan.created": "Создана копилка", "plan.withdraw": "Вывод", "plan.closed": "Закрыта копилка", "telegram.link": "Подключён Telegram", "kyc.submitted": "Отправлены документы",
     "auth.logout": "Выход", "security.sessions_revoked_all": "Выход на всех устройствах", "card.default": "Основная карта изменена", "plan.updated": "Изменена копилка",
     "plan.paused": "Копилка на паузе", "plan.resumed": "Копилка включена", "kyc.review": "Проверка документов", "statement.export": "Выгружена выписка",
-    "privacy.data_export": "Выгружены персональные данные", "profile.onboarding": "Подобрана стратегия", "profile.risk": "Пройдена анкета", "billing.pro": "Оплачен Pro",
+    "privacy.data_export": "Выгружены персональные данные", "profile.onboarding": "Подобран план", "profile.risk": "Пройдена анкета", "billing.pro": "Оплачен Pro",
     "auth.email_verified": "Подтверждена почта", "auth.recovery_code_used": "Использован код восстановления", "telegram.unlink": "Отключён Telegram",
   };
   const CONSENT: Record<string, [string, string]> = {
@@ -519,9 +519,9 @@ const QUIZ: [string, string[]][] = [
   ["Был ли у вас опыт с криптовалютой или акциями?", ["Нет", "Немного читал", "Покупал сам", "Регулярно инвестирую"]],
 ];
 const PROFILE: Record<string, [string, string]> = {
-  conservative: ["Осторожный", "Подходят стратегии «Доллар» и «Резерв» — риск не выше 2 из 5."],
-  moderate: ["Умеренный", "Подходят стратегии до «Баланса» — риск до 3 из 5."],
-  aggressive: ["Готовый к риску", "Подходят любые стратегии, включая «Рост» и «Максимум»."],
+  conservative: ["Осторожный", "Подходят планы «Доллар», «Резерв» и «Беларусь» — риск не выше 2 из 5."],
+  moderate: ["Умеренный", "Подходят планы до «Баланса» — риск до 3 из 5."],
+  aggressive: ["Готовый к риску", "Подходят любые планы, включая «Рост» и «Максимум»."],
 };
 
 function RiskQuiz() {

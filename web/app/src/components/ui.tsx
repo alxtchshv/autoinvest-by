@@ -1,5 +1,5 @@
 import { cloneElement, createContext, isValidElement, useCallback, useContext, useEffect, useId, useRef, useState, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode } from "react";
-import { AlertCircle, CheckCircle2, Info, X, TriangleAlert, Car, GraduationCap, Gift, Heart, Home, Laptop, PiggyBank, Plane, Rocket, Shield } from "lucide-react";
+import { AlertCircle, CheckCircle2, Info, MoreHorizontal, X, TriangleAlert, Car, GraduationCap, Gift, Heart, Home, Laptop, PiggyBank, Plane, Rocket, Shield } from "lucide-react";
 import { kop, pct, RUB } from "../lib/format";
 import { useSession } from "../lib/session";
 
@@ -293,3 +293,44 @@ export function HideProvider({ children }: { children: ReactNode }) {
 export const useHide = () => useContext(HCtx);
 
 export { pct };
+
+/** Меню «⋯» для редких действий, чтобы не перегружать шапку страницы кнопками. */
+export function MoreMenu({ items, label = "Ещё действия" }: { items: { label: string; icon?: ReactNode; onClick: () => void; danger?: boolean }[]; label?: string }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const h = (e: MouseEvent) => !ref.current?.contains(e.target as Node) && setOpen(false);
+    const k = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
+    document.addEventListener("mousedown", h);
+    document.addEventListener("keydown", k);
+    return () => { document.removeEventListener("mousedown", h); document.removeEventListener("keydown", k); };
+  }, [open]);
+  return (
+    <div className="more" ref={ref}>
+      <button type="button" className="btn btn-secondary more-btn" aria-label={label} title={label} aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(!open)}><MoreHorizontal /></button>
+      <div className={`more-pop ${open ? "open" : ""}`} role="menu" inert={!open}>
+        {items.map((it, i) => (
+          <button key={i} type="button" role="menuitem" className={it.danger ? "danger" : ""} onClick={() => { setOpen(false); it.onClick(); }}>{it.icon}{it.label}</button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** Список вопросов с плавным раскрытием — один и тот же на сайте и в поддержке. */
+export function Accordion({ items, first = 0 }: { items: [string, ReactNode][]; first?: number | null }) {
+  const [open, setOpen] = useState<number | null>(first);
+  return (
+    <div className="faq">
+      {items.map(([q, a], k) => (
+        <div key={q} className={`faq-item ${open === k ? "open" : ""}`}>
+          <button type="button" className="faq-q" aria-expanded={open === k} onClick={() => setOpen(open === k ? null : k)}>
+            {q}<span className="faq-ic" aria-hidden />
+          </button>
+          <div className="faq-a"><div><div className="faq-p">{a}</div></div></div>
+        </div>
+      ))}
+    </div>
+  );
+}

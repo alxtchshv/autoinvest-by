@@ -162,11 +162,11 @@
 .faq-item.open .faq-ic::after { transform: rotate(0deg); }
 .faq-a { display: grid; grid-template-rows: 0fr; transition: grid-template-rows .35s cubic-bezier(.22,.8,.2,1); }
 .faq-a > div { overflow: hidden; }
-.faq-a p { color: var(--ink-2); max-width: 46em; padding-bottom: 20px; opacity: 0; transform: translateY(-4px); transition: opacity .3s, transform .3s; }
+.faq-p { color: var(--ink-2); max-width: 46em; padding-bottom: 20px; opacity: 0; transform: translateY(-4px); transition: opacity .3s, transform .3s; line-height: 1.6; }
 .faq-item.open .faq-a { grid-template-rows: 1fr; }
-.faq-item.open .faq-a p { opacity: 1; transform: none; }
+.faq-item.open .faq-p { opacity: 1; transform: none; }
 @media (max-width: 860px) { .faq-wrap { grid-template-columns: 1fr; gap: 24px; } }
-@media (prefers-reduced-motion: reduce) { .deck-track, .faq-a, .faq-a p, .tm-bar i { transition: none; } }
+@media (prefers-reduced-motion: reduce) { .deck-track, .faq-a, .faq-p, .tm-bar i { transition: none; } }
 .final-cta { display: flex; align-items: center; justify-content: space-between; gap: 24px; flex-wrap: wrap; }
 
 .legal-doc { max-width: 760px; padding: 32px 0 64px; }
@@ -324,3 +324,67 @@
   .statement .sheet-body { padding: 0; }
   .statement-table { font-size: 11px; }
 }
+
+/* частые вопросы в поддержке — тот же список, компактнее */
+.faq-compact .faq-q { font-size: 15px; padding: 15px 0; }
+.faq-compact .faq-item:first-child { border-top: 0; }
+.faq-compact .faq-item:last-child { border-bottom: 0; }
+.faq-compact .faq-p { font-size: 14px; padding-bottom: 16px; }
+
+/* банковская карта в цветах банка */
+.bank-card.branded::after { content: ""; position: absolute; right: -40px; bottom: -60px; width: 220px; height: 220px; border-radius: 50%; background: rgba(255,255,255,.07); pointer-events: none; }
+.bank-card .bc-bank { display: inline-flex; align-items: center; gap: 10px; font-weight: 620; font-size: 15px; min-width: 0; }
+.bank-card .bc-bank > span:last-child { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bc-logo { width: 30px; height: 30px; border-radius: 8px; background: #fff; object-fit: contain; padding: 3px; flex: none; }
+.bc-mono { width: 30px; height: 30px; border-radius: 8px; background: rgba(255,255,255,.95); color: #1a1d24; display: grid; place-items: center; font-size: 11px; font-weight: 800; letter-spacing: -.02em; flex: none; }
+.export-date { min-width: 200px; }
+
+/* ---------- страница копилки ---------- */
+.pd h1 { font-size: 30px; line-height: 36px; }
+.pd .sheet-head h2 { font-size: 18px; }
+.pd-head { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.pd-head .plan-ico { width: 52px; height: 52px; border-radius: 14px; }
+.pd-head .plan-ico svg { width: 26px; height: 26px; }
+.pd-title { flex: 1; min-width: 220px; }
+.pd-title p { color: var(--muted); font-size: 16px; margin-top: 4px; }
+.pd-actions { display: flex; gap: 8px; align-items: center; }
+.pd-hero { display: grid; grid-template-columns: minmax(0, 1fr); gap: 28px; padding: 26px 28px; }
+.pd-hero.with-goal { grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr); }
+.pd-value .muted { font-size: 15px; }
+.pd-pnl { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: 10px; font-size: 16px; font-weight: 560; }
+.pd-goal { display: flex; flex-direction: column; gap: 8px; padding-left: 28px; border-left: 1px solid var(--line-2); font-size: 15px; }
+.pd-goal-sum { font-size: 24px; font-weight: 680; letter-spacing: -0.02em; }
+.pd-goal .bar { height: 10px; border-radius: 5px; }
+.pd-goal .bar span { border-radius: 5px; }
+.pd-goal-line { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.pd-goal-hint { font-size: 14px; padding: 10px 12px; border-radius: 10px; background: var(--paper); }
+.pd-goal-hint.warn { background: var(--warn-soft); }
+.pd-grid { display: grid; grid-template-columns: minmax(0, 1.75fr) minmax(280px, 1fr); gap: 16px; align-items: start; }
+.pd-run { display: flex; justify-content: space-between; align-items: center; font-size: 16px; }
+.pd-month { padding-top: 12px; border-top: 1px solid var(--line-2); font-size: 15px; }
+.pd-plan { display: flex; align-items: center; gap: 12px; padding: 12px; margin-top: 4px; border-radius: 12px; background: var(--paper); }
+.pd-plan-name { font-weight: 620; margin-bottom: 3px; }
+.pd-table td, .pd-table th { font-size: 15px; }
+.pd-table td { padding-top: 14px; padding-bottom: 14px; }
+@media (max-width: 960px) {
+  .pd-hero.with-goal { grid-template-columns: 1fr; }
+  .pd-goal { padding-left: 0; border-left: 0; padding-top: 20px; border-top: 1px solid var(--line-2); }
+  .pd-grid { grid-template-columns: 1fr; }
+  .pd h1 { font-size: 24px; line-height: 30px; }
+}
+@media (max-width: 560px) { .pd-actions { width: 100%; } .pd-actions .btn:not(.more-btn) { flex: 1; } .pd-hero { padding: 20px; } }
+
+/* ---------- калькулятор ---------- */
+.calc-grid { display: grid; grid-template-columns: minmax(0, 340px) minmax(0, 1fr); gap: 16px; align-items: start; }
+@media (max-width: 900px) { .calc-grid { grid-template-columns: 1fr; } }
+.calc-dep { padding-top: 4px; display: flex; flex-direction: column; gap: 12px; }
+.calc-empty { min-height: 360px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; text-align: center; padding: 24px; }
+.calc-empty b { font-size: 17px; }
+.calc-empty-ic { width: 56px; height: 56px; border-radius: 16px; background: var(--brand-soft); color: var(--brand); display: grid; place-items: center; margin-bottom: 8px; }
+.calc-empty-ic svg { width: 28px; height: 28px; }
+.calc-result { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+.calc-result .muted { font-size: 15px; }
+.calc-stale { opacity: .55; transition: opacity .2s; }
+@media (max-width: 520px) { .calc-result { grid-template-columns: 1fr; } }
+.onb-amount { font-size: 17px; font-weight: 600; }
+.onb .plan-tile { cursor: default; }

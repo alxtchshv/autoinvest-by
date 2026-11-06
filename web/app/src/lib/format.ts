@@ -137,7 +137,8 @@ export function initials(name: string) {
 /** Парсит "15", "15,5", "1 500.50" в копейки; NaN если пусто/ошибка */
 export function parseKop(s: string): number {
   const c = s.replace(/[\s ]/g, "").replace(",", ".");
-  if (!c || !/^\d+(\.\d{0,2})?$/.test(c)) return NaN;
+  // не больше 9 цифр в рублях: отсекаем «бесконечные» суммы ещё до сервера
+  if (!c || !/^\d{1,9}(\.\d{0,2})?$/.test(c)) return NaN;
   return Math.round(parseFloat(c) * 100);
 }
 

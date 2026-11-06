@@ -51,6 +51,7 @@ type Config struct {
 	FinnhubKey string
 
 	TelegramToken    string
+	BinLookup        string // binlist | off — запасной справочник банка по BIN, если эквайринг его не прислал
 	TelegramUsername string
 	SupportChatID    int64 // чат, куда бот пересылает новые обращения
 
@@ -96,6 +97,7 @@ func Load() (*Config, error) {
 		Market:           env("MARKET", MarketLive),
 		FinnhubKey:       env("FINNHUB_API_KEY", ""),
 		TelegramToken:    env("TELEGRAM_BOT_TOKEN", ""),
+		BinLookup:        env("BIN_LOOKUP", "binlist"),
 		TelegramUsername: strings.TrimPrefix(env("TELEGRAM_BOT_USERNAME", ""), "@"),
 		SupportChatID:    envInt64("TELEGRAM_SUPPORT_CHAT_ID", 0),
 		SMTPHost:         env("SMTP_HOST", ""),

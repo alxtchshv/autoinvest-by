@@ -187,8 +187,12 @@ func TestStocksAndBondsArePricedByTheirOwnSources(t *testing.T) {
 		t.Fatalf("accrual candles must grow: %v %d", err, len(cs))
 	}
 	for _, a := range Catalog {
-		if (a.Kind == "stock" || a.Kind == "bond") && !a.ProOnly {
+		// акции США — только Pro; токены компаний РБ открыты всем: Беларусь — основная страна сервиса
+		if a.Kind == "stock" && !a.ProOnly {
 			t.Errorf("%s must be Pro-only", a.Symbol)
+		}
+		if a.Kind == "bond" && a.ProOnly {
+			t.Errorf("%s must be available without Pro", a.Symbol)
 		}
 		if a.Kind == "bond" && !a.Indicative {
 			t.Errorf("%s has no market data and must be flagged indicative", a.Symbol)

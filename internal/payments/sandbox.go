@@ -18,14 +18,17 @@ type TestCard struct {
 	Brand    string `json:"brand"`
 	Behavior string `json:"behavior"` // ok | nofunds | decline
 	Label    string `json:"label"`
+	// Issuer — банк, который песочница «присылает» вместо настоящего эквайринга, чтобы на стенде было видно
+	// определение банка и оформление карты. Номера тестовые, к этим банкам отношения не имеют.
+	Issuer string `json:"issuer"`
 }
 
 var TestCards = []TestCard{
-	{"4200000000000000", "visa", "ok", "Успешные операции"},
-	{"5555555555554444", "mastercard", "ok", "Успешные операции"},
-	{"9112000000000006", "belkart", "ok", "Белкарт, успешные операции"},
-	{"4005550000000019", "visa", "nofunds", "Привязывается, но списания отклоняются: недостаточно средств"},
-	{"4000000000000002", "visa", "decline", "Банк отклоняет привязку"},
+	{"4200000000000000", "visa", "ok", "Успешные операции", "Беларусбанк"},
+	{"5555555555554444", "mastercard", "ok", "Успешные операции", "Приорбанк"},
+	{"9112000000000006", "belkart", "ok", "Белкарт, успешные операции", "Белагропромбанк"},
+	{"4005550000000019", "visa", "nofunds", "Привязывается, но списания отклоняются: недостаточно средств", "Альфа-Банк"},
+	{"4000000000000002", "visa", "decline", "Банк отклоняет привязку", "Тестовый банк"},
 }
 
 // Sandbox — встроенная тестовая платёжка. Реальные карты не принимаются.
@@ -72,7 +75,7 @@ func (s *Sandbox) Tokenize(number, holder string, expMonth, expYear int) (Card, 
 	return Card{
 		Token: "sbx_" + tc.Behavior + "_" + strings.ToLower(auth.RandomCode(20, "")),
 		Brand: tc.Brand, Last4: number[len(number)-4:], Holder: strings.ToUpper(strings.TrimSpace(holder)),
-		Issuer: "Тестовый банк", BIN: number[:6], ExpMonth: expMonth, ExpYear: expYear,
+		Issuer: tc.Issuer, BIN: number[:6], ExpMonth: expMonth, ExpYear: expYear,
 	}, nil
 }
 

@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { AreaSeries, ColorType, createChart, LineSeries, LineStyle, type UTCTimestamp } from "lightweight-charts";
 import { ArrowLeft, ArrowRight, Bell, Check, Lock, SlidersHorizontal } from "lucide-react";
@@ -7,7 +7,8 @@ import { byn, groupInt, kop, pct, planName, price, RUB } from "../../lib/format"
 import { useTitle } from "../../lib/hooks";
 import { useMarket, useSession } from "../../lib/session";
 import type { Strategy } from "../../lib/types";
-import { AssetIcon, Change, RiskDots, riskLabel } from "../../components/ui";
+import { Accordion, AssetIcon, Change, RiskDots, riskLabel } from "../../components/ui";
+import { PITCH, PlanMark, Ring } from "../../components/plans";
 
 /** Оригинальные названия активов — так их называют биржи и так их узнают. */
 function useAssetName() {
@@ -24,18 +25,8 @@ type ShowItem = {
 
 const itemTitle = (x: ShowItem) => (x.kind === "strategy" ? planName(x.name) : x.name);
 
-/** Значок плана: маленькое кольцо с долями активов. */
-function PlanMark({ id }: { id: string }) {
-  const { config } = useSession();
-  const s = config?.strategies.find((x) => x.id === id);
-  if (!s) return <span className="plan-mark" />;
-  const parts = Object.entries(s.weights).sort((a, b) => b[1] - a[1]);
-  const colorOf = (a: string) => config?.assets.find((x) => x.symbol === a)?.color || "#8a919e";
-  return <span className="plan-mark"><Ring parts={parts} colorOf={colorOf} size={26} r={9} width={6} gap={1.2} /></span>;
-}
-
 function ItemMark({ x }: { x: ShowItem }) {
-  return x.kind === "strategy" ? <PlanMark id={x.id} /> : <AssetIcon symbol={x.symbol!} size="sm" />;
+  return x.kind === "strategy" ? <PlanMark id={x.id} size={20} /> : <AssetIcon symbol={x.symbol!} size="sm" />;
 }
 
 function useShowcase(amount: number, years: number) {
@@ -151,7 +142,7 @@ function LiveTicker() {
   ));
   return (
     <div className="ticker-wrap">
-      <div className="ticker-head"><span className="ticker-live"><i />Цены сейчас</span><span className="tiny faint">биржевые котировки в рублях по курсу НБРБ, обновляются каждые 5 секунд</span></div>
+      <div className="ticker-head"><span className="ticker-live"><i />Цены сейчас</span><span className="tiny faint">биржевые котировки в рублях по курсу НБРБ</span></div>
       <div className="marquee" aria-label="Цены сейчас">
         <div className="marquee-track" style={{ animationDuration: list.length * 6 + "s" }}>
           <div className="marquee-set">{items}</div>
@@ -177,7 +168,7 @@ function HowItWorks() {
       ),
     },
     {
-      title: "Выберите сумму и стратегию", text: "Например, 20 " + RUB + " каждую пятницу.",
+      title: "Выберите сумму и план", text: "Например, 20 " + RUB + " каждую пятницу.",
       art: (
         <div className="art-setup">
           <div className="row between"><span className="art-amount num">20 {RUB}</span><span className="tiny muted">План «Резерв»</span></div>
@@ -214,49 +205,6 @@ function HowItWorks() {
 
 /* ---------------- Стратегии: листаемая презентация ---------------- */
 
-const PITCH: Record<string, string> = {
-  dollar: "Копите в долларах. Рубль может слабеть — доллар остаётся долларом.",
-  reserve: "Доллар и золото — то, что люди покупают в неспокойные времена.",
-  balanced: "Половина в долларе, остальное — золото и биткоин ради роста.",
-  growth: "Ставка на криптовалюты: растёт сильнее, но и падает глубже.",
-  crypto: "Три крупные криптовалюты для тех, кто готов ждать от трёх лет.",
-  max: "Только криптовалюта, включая молодые монеты. Деньги, которые не жалко.",
-};
-
-/** Кольцо долей. Разделители — прозрачные радиальные прорези постоянной ширины (через маску): щель в штрихе
- *  дуги расширялась бы к внешнему краю, а прорезь одинаковая от внутреннего края до внешнего и не зависит от фона. */
-function Ring({ parts, colorOf, size, r, width, gap }: { parts: [string, number][]; colorOf: (s: string) => string; size: number; r: number; width: number; gap: number }) {
-  const id = useId();
-  const C = 2 * Math.PI * r, cx = size / 2;
-  const r0 = r - width / 2 - 1, r1 = r + width / 2 + 1;
-  let acc = 0, accBp = 0;
-  return (
-    <svg viewBox={`0 0 ${size} ${size}`} aria-hidden>
-      {parts.length > 1 && (
-        <mask id={id} maskUnits="userSpaceOnUse" x="0" y="0" width={size} height={size}>
-          <rect width={size} height={size} fill="#fff" />
-          {parts.map(([a, w]) => {
-            const ang = (accBp / 10000) * 2 * Math.PI - Math.PI / 2;
-            accBp += w;
-            const c = Math.cos(ang), sn = Math.sin(ang);
-            return <line key={a} x1={cx + r0 * c} y1={cx + r0 * sn} x2={cx + r1 * c} y2={cx + r1 * sn} stroke="#000" strokeWidth={gap} />;
-          })}
-        </mask>
-      )}
-      <g mask={parts.length > 1 ? `url(#${id})` : undefined}>
-        {parts.map(([a, w]) => {
-          const len = (w / 10000) * C;
-          // единственная доля — полный круг без стыка
-          const el = parts.length === 1
-            ? <circle key={a} cx={cx} cy={cx} r={r} fill="none" stroke={colorOf(a)} strokeWidth={width} />
-            : <circle key={a} cx={cx} cy={cx} r={r} fill="none" stroke={colorOf(a)} strokeWidth={width} strokeDasharray={`${len} ${C}`} strokeDashoffset={-acc} transform={`rotate(-90 ${cx} ${cx})`} />;
-          acc += len;
-          return el;
-        })}
-      </g>
-    </svg>
-  );
-}
 
 function Donut({ parts, colorOf, center }: { parts: [string, number][]; colorOf: (s: string) => string; center: ReactNode }) {
   return (
@@ -363,8 +311,8 @@ function StrategyDeck({ strategies }: { strategies: Strategy[] }) {
           ))}
           <div className="deck-slide" aria-hidden={i !== n - 1} inert={i !== n - 1}><CustomSlide cta={cta} /></div>
         </div>
-        <button className="deck-arrow prev" aria-label="Предыдущая стратегия" disabled={i === 0} onClick={() => go(i - 1)}><ArrowLeft /></button>
-        <button className="deck-arrow next" aria-label="Следующая стратегия" disabled={i === n - 1} onClick={() => go(i + 1)}><ArrowRight /></button>
+        <button className="deck-arrow prev" aria-label="Предыдущий план" disabled={i === 0} onClick={() => go(i - 1)}><ArrowLeft /></button>
+        <button className="deck-arrow next" aria-label="Следующий план" disabled={i === n - 1} onClick={() => go(i + 1)}><ArrowRight /></button>
       </div>
       <div className="deck-tabs" role="tablist" ref={tabsRef}>
         {strategies.map((s, k) => (
@@ -384,27 +332,16 @@ const FAQ: [string, string][] = [
   ["Где хранятся мои деньги и активы?", "Деньги списываются с вашей карты через платёжного агрегатора bePaid и сразу идут на покупку активов у оператора криптоплатформы — резидента Парка высоких технологий. На счетах AutoInvest деньги не лежат. Состав и стоимость копилки видны в реальном времени. Пока сервис работает в тестовом режиме, покупки учебные: цены настоящие, но деньги не списываются — об этом говорит плашка вверху страницы."],
   ["Сколько это стоит?", "Открыть и вести копилку бесплатно. С каждого пополнения удерживается комиссия сервиса — 1% на тарифе Старт и 0,5% на Pro. Курс покупки — биржевая цена плюс спред партнёра 1%. Всё это видно в чеке каждой операции."],
   ["Как вывести деньги?", "В любой момент: откройте копилку и нажмите «Вывести». Активы продаются по текущей цене, деньги приходят на привязанную карту. Без штрафов и сроков удержания."],
-  ["Можно ли потерять деньги?", "Да. Криптовалюты сильно колеблются — биткоин исторически падал на 70–80% от пика. Цифровой доллар повторяет курс доллара, золото меняется медленнее. Выбирайте стратегию по своему отношению к риску — анкета после регистрации подскажет."],
+  ["Можно ли потерять деньги?", "Да. Криптовалюты сильно колеблются — биткоин исторически падал на 70–80% от пика. Цифровой доллар повторяет курс доллара, золото меняется медленнее. Выбирайте план по своему отношению к риску — анкета после регистрации подскажет."],
   ["Зачем пополнять регулярно, а не купить один раз?", "Когда вы покупаете на одинаковую сумму каждую неделю, в дешёвые периоды получаете больше актива, в дорогие — меньше. Средняя цена сглаживается, и не нужно угадывать момент. Этот подход называют усреднением."],
   ["Можно ли настроить копилку под себя?", "Да. Сумму, день и частоту пополнения можно поменять в любой момент, копилку — поставить на паузу. На тарифе Pro можно собрать свой состав из любых активов и включить докупку при падении цены."],
+  ["Какие активы доступны?", "На всех тарифах — цифровой доллар USDT, золото PAX Gold, крупные криптовалюты и токены белорусских компаний с фиксированной доходностью. На Pro — ещё токены, следующие за акциями США (S&P 500, Apple, Microsoft, Nvidia, Tesla)."],
   ["Какие карты подходят?", "Visa, Mastercard и Белкарт белорусских банков. Номер карты вы вводите на защищённой странице bePaid, сервис получает только токен для списаний."],
   ["Что с налогами?", "По разъяснению МНС доходы физлиц от операций с токенами через резидентов ПВТ подоходным налогом не облагаются; через зарубежные площадки — 13% по декларации. Подробно — в разделе «Налоги» внизу страницы."],
 ];
 
 function Faq() {
-  const [open, setOpen] = useState<number | null>(0);
-  return (
-    <div className="faq">
-      {FAQ.map(([q, a], k) => (
-        <div key={q} className={`faq-item ${open === k ? "open" : ""}`}>
-          <button className="faq-q" aria-expanded={open === k} onClick={() => setOpen(open === k ? null : k)}>
-            {q}<span className="faq-ic" aria-hidden />
-          </button>
-          <div className="faq-a"><div><p>{a}</p></div></div>
-        </div>
-      ))}
-    </div>
-  );
+  return <Accordion items={FAQ} />;
 }
 
 /* ---------------- Страница ---------------- */
@@ -426,7 +363,7 @@ export default function Landing() {
   const ctaTo = me?.user ? "/app/plans/new" : "/register";
   const facts = useMemo(() => [
     [`от 5 ${RUB}`, "минимальное пополнение"],
-    ["6 активов", "доллар, золото, криптовалюты"],
+    ["7 планов", "доллар, золото, крипта, токены РБ"],
     ["без штрафов", "вывод на карту в любой момент"],
   ], []);
 
@@ -437,7 +374,7 @@ export default function Landing() {
     return () => clearTimeout(t);
   }, [loc.hash, strategies.length]);
 
-  const proFeatures = [`До ${config?.pro_plan_limit ?? 20} копилок`, "Свой состав активов", "Акции США и токены компаний РБ", "Докупка при падении цены", `Комиссия ${feePro} с пополнения`];
+  const proFeatures = [`До ${config?.pro_plan_limit ?? 20} копилок`, "Свой состав активов", "Акции США", "Докупка при падении цены", `Комиссия ${feePro} с пополнения`];
   return (
     <>
       <section className="wrapx hero">
@@ -466,7 +403,7 @@ export default function Landing() {
       <section className="section" id="strategies">
         <div className="wrapx">
           <h2 className="big">Выберите план</h2>
-          <p className="sub">Шесть готовых планов — от спокойного до смелого. Или соберите свой.</p>
+          <p className="sub">Семь готовых планов — от спокойного до смелого, включая токены белорусских компаний. Или соберите свой.</p>
           <StrategyDeck strategies={strategies} />
         </div>
       </section>
@@ -482,7 +419,8 @@ export default function Landing() {
               <div className="small muted">навсегда</div>
               <ul>
                 <li><Check />До {config?.free_plan_limit ?? 3} копилок</li>
-                <li><Check />Шесть готовых планов</li>
+                <li><Check />Семь готовых планов</li>
+                <li><Check />Токены компаний Беларуси</li>
                 <li><Check />Комиссия {feeFree} с пополнения</li>
                 <li><Check />Уведомления в Telegram</li>
               </ul>

@@ -81,6 +81,14 @@ func (e *Engine) lock(planID int64) (func(), bool) {
 	return m.Unlock, true
 }
 
+// FeeBP — комиссия сервиса для пользователя, в базисных пунктах.
+func (e *Engine) FeeBP(u *store.User) int64 {
+	if u == nil {
+		return e.Cfg.FeeFreeBP
+	}
+	return e.feeBP(u)
+}
+
 func (e *Engine) feeBP(u *store.User) int64 {
 	if u.IsPro() {
 		return e.Cfg.FeeProBP

@@ -30,6 +30,15 @@ type planView struct {
 	NextRuns       []int64          `json:"next_runs"`
 }
 
+// planRiskOf — риск копилки: у готового плана — его заявленный риск (как на сайте и в выборе плана),
+// у своего состава — средневзвешенный риск активов.
+func planRiskOf(p *store.Plan) int {
+	if st, ok := market.FindStrategy(p.Strategy); ok {
+		return st.Risk
+	}
+	return planRisk(p.Allocations)
+}
+
 func planRisk(allocs []store.Alloc) int {
 	var r float64
 	for _, a := range allocs {
@@ -40,8 +49,11 @@ func planRisk(allocs []store.Alloc) int {
 	return int(math.Max(1, math.Round(r)))
 }
 
+// goalMaxRuns — дальше этого прогноз не строим: ежедневная копилка за 30 лет — около 11 000 пополнений.
+const goalMaxRuns = 11000
+
 func (s *Server) viewPlan(r *http.Request, p *store.Plan, cards map[int64]*store.Card) planView {
-	v := planView{Plan: p, Valuation: s.En.Value(p.Positions), Risk: planRisk(p.Allocations), NextRuns: []int64{}}
+	v := planView{Plan: p, Valuation: s.En.Value(p.Positions), Risk: planRiskOf(p), NextRuns: []int64{}}
 	if p.CardID != nil {
 		v.Card = cards[*p.CardID]
 	}
@@ -61,16 +73,40 @@ func (s *Server) viewPlan(r *http.Request, p *store.Plan, cards map[int64]*store
 	if p.GoalKop != nil && *p.GoalKop > 0 {
 		v.GoalProgressBP = min(v.Valuation.ValueKop*10000 / *p.GoalKop, 10000)
 		left := *p.GoalKop - v.Valuation.ValueKop
-		if left > 0 && v.MonthlyKop > 0 && p.Status == "active" {
-			months := float64(left) / float64(v.MonthlyKop)
-			eta := time.Now().AddDate(0, int(math.Ceil(months)), 0).Format("2006-01-02")
-			v.GoalETA = &eta
+		u := currentUser(r)
+		netShare := 1 - float64(s.En.FeeBP(u))/10000 // в активы идёт пополнение за вычетом комиссии
+		if left > 0 && p.Status == "active" && p.NextRunAt != nil && p.AmountKop > 0 {
+			// Идём по настоящему расписанию копилки (числа месяца, дни недели), а не по «30 дней в месяце».
+			// Рост цен не учитываем — прогноз консервативный.
+			net := float64(p.AmountKop) * netShare
+			if runs := int(math.Ceil(float64(left) / net)); runs <= goalMaxRuns {
+				t := *p.NextRunAt
+				for i := 1; i < runs; i++ {
+					n := engine.NextRun(p, time.Unix(t, 0), true)
+					if n == nil {
+						break
+					}
+					t = *n
+				}
+				eta := time.Unix(t, 0).In(engine.Minsk).Format("2006-01-02")
+				v.GoalETA = &eta
+			}
 		}
-		if p.GoalDate != nil && left > 0 {
-			if d, err := time.Parse("2006-01-02", *p.GoalDate); err == nil {
-				months := d.Sub(time.Now()).Hours() / 24 / 30.4
-				if months >= 0.5 && engine.PeriodsPerMonth(p.Frequency) > 0 {
-					need := int64(math.Ceil(float64(left) / (months * engine.PeriodsPerMonth(p.Frequency))))
+		if p.GoalDate != nil && left > 0 && p.Status == "active" && p.NextRunAt != nil {
+			if d, err := time.ParseInLocation("2006-01-02", *p.GoalDate, engine.Minsk); err == nil {
+				// сколько пополнений по расписанию успеет пройти до конца дня цели
+				end := d.AddDate(0, 0, 1).Unix()
+				runs := 0
+				for t := *p.NextRunAt; t < end && runs < goalMaxRuns; runs++ {
+					n := engine.NextRun(p, time.Unix(t, 0), true)
+					if n == nil {
+						runs++
+						break
+					}
+					t = *n
+				}
+				if runs > 0 {
+					need := int64(math.Ceil(float64(left) / netShare / float64(runs)))
 					v.GoalNeedKop = &need
 				}
 			}
@@ -161,7 +197,7 @@ func (s *Server) applyPlanInput(r *http.Request, u *store.User, p *store.Plan, i
 		if *in.GoalDate == "" {
 			p.GoalDate = nil
 		} else if d, err := time.Parse("2006-01-02", *in.GoalDate); err != nil || d.Before(time.Now()) || d.After(time.Now().AddDate(30, 0, 0)) {
-			return "goal_date", "Дата цели должна быть в будущем"
+			return "goal_date", "Дата цели — от завтрашнего дня и не дальше чем через 30 лет"
 		} else {
 			p.GoalDate = in.GoalDate
 		}
@@ -239,7 +275,7 @@ func (s *Server) applyPlanInput(r *http.Request, u *store.User, p *store.Plan, i
 			p.Allocations = allocs
 		}
 		p.Strategy = *in.Strategy
-		if u.RiskProfile != "" && planRisk(p.Allocations) > maxRisk(u.RiskProfile) && !in.RiskAck {
+		if u.RiskProfile != "" && planRiskOf(p) > maxRisk(u.RiskProfile) && !in.RiskAck {
 			return "risk_ack", "risk"
 		}
 	}

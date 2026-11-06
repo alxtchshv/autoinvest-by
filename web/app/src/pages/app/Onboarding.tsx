@@ -1,11 +1,12 @@
 import { useState } from "react";
+import { PlanTile } from "../../components/plans";
 import { Link, useNavigate } from "react-router-dom";
 import { api } from "../../lib/api";
 import { byn, planName } from "../../lib/format";
 import { useSubmit, useTitle } from "../../lib/hooks";
 import { useSession } from "../../lib/session";
 import type { Plan, Strategy } from "../../lib/types";
-import { AssetIcon, Button, Notice, RiskDots, riskLabel } from "../../components/ui";
+import { Button, Notice } from "../../components/ui";
 
 const QUESTIONS: [string, string[]][] = [
   ["Какую сумму вам комфортно откладывать в месяц?", ["До 50 ⃅", "50–200 ⃅", "От 200 ⃅"]],
@@ -21,7 +22,7 @@ type Rec = {
 
 export default function Onboarding() {
   useTitle("Подбор копилки");
-  const { me, reload, config } = useSession();
+  const { me, reload } = useSession();
   const nav = useNavigate();
   const [step, setStep] = useState(0);
   const [answers, setAnswers] = useState<number[]>([]);
@@ -73,17 +74,8 @@ export default function Onboarding() {
         <section className="sheet sheet-pad stack g16">
           <div className="small muted">Подходящая копилка «{rec.name}»</div>
           <h1>{planName(strategy.name)}</h1>
-          <p className="muted">{strategy.description}</p>
-          <div className="onb-alloc">
-            {Object.entries(strategy.weights).sort((a, b) => b[1] - a[1]).map(([sym, w]) => (
-              <div key={sym} className="row g8"><AssetIcon symbol={sym} size="sm" /><span className="grow">{config?.assets.find((a) => a.symbol === sym)?.name || sym}</span><span className="num">{w / 100}%</span></div>
-            ))}
-          </div>
-          <div className="row g12 wrap small">
-            <span className="row g8"><RiskDots risk={strategy.risk} />{riskLabel(strategy.risk)}</span>
-            <span className="muted">·</span>
-            <span>{byn(rec.amount_kop)} каждую пятницу ≈ {byn(rec.monthly_kop)} в месяц</span>
-          </div>
+          <PlanTile s={strategy} selected />
+          <div className="onb-amount">{byn(rec.amount_kop)} каждую пятницу <span className="muted">≈ {byn(rec.monthly_kop)} в месяц</span></div>
           <ul className="onb-reasons">{rec.reasons.map((r) => <li key={r}>{r}</li>)}</ul>
           {rec.goal_comment && <Notice kind="info">{rec.goal_comment}</Notice>}
           {!me?.cards && <Notice kind="info">Карты ещё нет — копилка создастся на паузе, а мы сразу предложим привязать карту.</Notice>}

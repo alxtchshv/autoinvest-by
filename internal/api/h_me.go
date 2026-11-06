@@ -63,7 +63,8 @@ func (s *Server) changePassword(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusTooManyRequests, "Слишком много попыток. Подождите 15 минут")
 		return
 	}
-	if !auth.CheckPassword(u.PasswordHash, in.Current) {
+	// у аккаунта, созданного через Google/Apple, пароля ещё нет — его можно задать без текущего
+	if u.HasPassword && !auth.CheckPassword(u.PasswordHash, in.Current) {
 		writeFieldErr(w, "current", "Текущий пароль указан неверно")
 		return
 	}
@@ -159,8 +160,8 @@ func (s *Server) disable2FA(w http.ResponseWriter, r *http.Request) {
 	if !readJSON(w, r, &in) {
 		return
 	}
-	if !auth.CheckPassword(u.PasswordHash, in.Password) {
-		writeFieldErr(w, "password", "Неверный пароль")
+	if msg := passwordGate(u, in.Password); msg != "" {
+		writeFieldErr(w, "password", msg)
 		return
 	}
 	if !auth.VerifyTOTP(u.TOTPSecret, in.Code, time.Now()) && !s.useRecoveryCode(r, u, in.Code) {
@@ -250,7 +251,7 @@ var auditLabels = map[string]string{
 	"security.password_changed": "Смена пароля", "security.2fa_enabled": "Включена двухфакторная защита", "security.2fa_disabled": "Отключена двухфакторная защита",
 	"security.sessions_revoked": "Завершены другие сеансы", "security.session_revoked": "Завершён сеанс", "security.sessions_revoked_all": "Выход на всех устройствах",
 	"security.audit_export": "Выгружен журнал действий",
-	"card.added": "Привязана карта", "card.removed": "Удалена карта", "card.default": "Изменена основная карта",
+	"card.added":            "Привязана карта", "card.removed": "Удалена карта", "card.default": "Изменена основная карта",
 	"plan.created": "Создана копилка", "plan.updated": "Изменена копилка", "plan.paused": "Копилка на паузе", "plan.resumed": "Копилка включена",
 	"plan.withdraw": "Вывод", "plan.closed": "Закрыта копилка",
 	"kyc.submitted": "Отправлены документы", "kyc.review": "Проверка документов", "kyc.msi": "Идентификация через МСИ", "kyc.provider": "Проверка личности",
@@ -309,8 +310,8 @@ func (s *Server) deleteAccount(w http.ResponseWriter, r *http.Request) {
 	if !readJSON(w, r, &in) {
 		return
 	}
-	if !auth.CheckPassword(u.PasswordHash, in.Password) {
-		writeFieldErr(w, "password", "Неверный пароль")
+	if msg := passwordGate(u, in.Password); msg != "" {
+		writeFieldErr(w, "password", msg)
 		return
 	}
 	plans, _ := s.St.Plans(r.Context(), u.ID, true)
@@ -444,6 +445,10 @@ func (s *Server) telegramLink(w http.ResponseWriter, r *http.Request) {
 	code := auth.RandomCode(24, "abcdefghijkmnopqrstuvwxyz23456789")
 	if err := s.St.CreateTelegramLink(r.Context(), currentUser(r).ID, code, 15*60); err != nil {
 		s.internal(w, r, err)
+		return
+	}
+	if s.TG != nil {
+		writeJSON(w, 200, map[string]string{"url": "/telegram-sandbox?start=" + code, "test": "1"})
 		return
 	}
 	writeJSON(w, 200, map[string]string{"url": "https://t.me/" + s.Bot.Username + "?start=" + code})

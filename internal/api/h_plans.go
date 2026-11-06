@@ -11,7 +11,6 @@ import (
 	"strings"
 	"time"
 
-	"autoinvest/internal/auth"
 	"autoinvest/internal/engine"
 	"autoinvest/internal/market"
 	"autoinvest/internal/money"
@@ -437,10 +436,9 @@ func (s *Server) pausePlan(w http.ResponseWriter, r *http.Request) {
 	if p == nil {
 		return
 	}
-	if p.Status == "active" {
-		p.Status, p.NextRunAt, p.Allocations = "paused", nil, nil
-		s.St.UpdatePlan(r.Context(), p)
-		s.St.Audit(r.Context(), p.UserID, p.UserID, "plan.paused", p.Name, clientIP(r))
+	if err := s.En.PausePlan(r.Context(), p, clientIP(r)); err != nil {
+		s.internal(w, r, err)
+		return
 	}
 	s.getPlan(w, r)
 }
@@ -450,22 +448,17 @@ func (s *Server) resumePlan(w http.ResponseWriter, r *http.Request) {
 	if p == nil {
 		return
 	}
-	if p.Status == "closed" {
-		writeErr(w, http.StatusConflict, "Копилка закрыта")
+	switch err := s.En.ResumePlan(r.Context(), p, clientIP(r)); {
+	case errors.Is(err, engine.ErrPlanClosed):
+		writeErr(w, http.StatusConflict, err.Error())
+		return
+	case errors.Is(err, engine.ErrNoCardResume):
+		writeJSON(w, http.StatusConflict, apiErr{Error: err.Error(), Code: "no_card"})
+		return
+	case err != nil:
+		s.internal(w, r, err)
 		return
 	}
-	if p.CardID == nil {
-		if c, err := s.St.DefaultCard(r.Context(), p.UserID); err == nil {
-			p.CardID = &c.ID
-		} else {
-			writeJSON(w, http.StatusConflict, apiErr{Error: "Привяжите карту, чтобы включить копилку", Code: "no_card"})
-			return
-		}
-	}
-	p.Status, p.FailCount, p.Allocations = "active", 0, nil
-	p.NextRunAt = engine.NextRun(p, time.Now(), false)
-	s.St.UpdatePlan(r.Context(), p)
-	s.St.Audit(r.Context(), p.UserID, p.UserID, "plan.resumed", p.Name, clientIP(r))
 	s.getPlan(w, r)
 }
 
@@ -507,7 +500,7 @@ func (s *Server) topupPlan(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) engineErr(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
-	case errors.Is(err, engine.ErrNoCard):
+	case errors.Is(err, engine.ErrNoCardResume):
 		writeJSON(w, http.StatusConflict, apiErr{Error: err.Error(), Code: "no_card"})
 	case errors.Is(err, engine.ErrKYCRequired):
 		writeJSON(w, http.StatusConflict, apiErr{Error: err.Error(), Code: "kyc_required"})
@@ -571,8 +564,8 @@ func (s *Server) confirmPassword(w http.ResponseWriter, r *http.Request, passwor
 		writeErr(w, http.StatusTooManyRequests, "Слишком много попыток. Подождите 15 минут")
 		return false
 	}
-	if !auth.CheckPassword(u.PasswordHash, password) {
-		writeFieldErr(w, "password", "Неверный пароль")
+	if msg := passwordGate(u, password); msg != "" {
+		writeFieldErr(w, "password", msg)
 		return false
 	}
 	return true

@@ -77,7 +77,7 @@ func (s *Server) createTicket(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, r, err)
 		return
 	}
-	s.alertSupport(fmt.Sprintf("Новое обращение #%d от %s\n<b>%s</b>\n%s", id, html.EscapeString(u.Email), html.EscapeString(in.Subject), html.EscapeString(truncate(in.Body, 500))))
+	s.alertSupport(fmt.Sprintf("Новое обращение #%d от %s\n<b>%s</b>\n%s\n\nОтветьте на это сообщение (reply), чтобы ответить клиенту.", id, html.EscapeString(u.Email), html.EscapeString(in.Subject), html.EscapeString(truncate(in.Body, 500))))
 	t, _ := s.St.Ticket(r.Context(), u.ID, id)
 	writeJSON(w, http.StatusCreated, map[string]any{"ticket": t})
 }

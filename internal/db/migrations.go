@@ -287,4 +287,30 @@ ALTER TABLE users ADD COLUMN onboarded_at INTEGER;
 ALTER TABLE kyc ADD COLUMN method TEXT NOT NULL DEFAULT 'manual';
 ALTER TABLE kyc ADD COLUMN provider_ref TEXT NOT NULL DEFAULT '';
 `,
+	// вход через Google/Apple, по телефону с кодом
+	`
+ALTER TABLE users ADD COLUMN phone_verified_at INTEGER;
+CREATE UNIQUE INDEX users_phone_verified ON users(phone) WHERE phone_verified_at IS NOT NULL AND phone != '';
+CREATE TABLE user_identities (
+	provider   TEXT NOT NULL,
+	subject    TEXT NOT NULL,
+	user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+	email      TEXT NOT NULL DEFAULT '',
+	created_at INTEGER NOT NULL,
+	PRIMARY KEY (provider, subject)
+);
+CREATE INDEX user_identities_user ON user_identities(user_id);
+CREATE TABLE phone_codes (
+	id         INTEGER PRIMARY KEY,
+	phone      TEXT NOT NULL,
+	purpose    TEXT NOT NULL,
+	user_id    INTEGER,
+	code_hash  TEXT NOT NULL,
+	attempts   INTEGER NOT NULL DEFAULT 0,
+	used       INTEGER NOT NULL DEFAULT 0,
+	expires_at INTEGER NOT NULL,
+	created_at INTEGER NOT NULL
+);
+CREATE INDEX phone_codes_phone ON phone_codes(phone, purpose);
+`,
 }

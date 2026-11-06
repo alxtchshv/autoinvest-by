@@ -40,6 +40,8 @@ type User struct {
 	Email            string `json:"email"`
 	EmailVerified    bool   `json:"email_verified"`
 	Phone            string `json:"phone"`
+	PhoneVerified    bool   `json:"phone_verified"`
+	HasPassword      bool   `json:"has_password"`
 	Name             string `json:"name"`
 	PasswordHash     string `json:"-"`
 	Role             string `json:"role"`
@@ -76,17 +78,20 @@ func (u *User) IsStaff() bool { return u.Role == "admin" || u.Role == "support" 
 
 const userCols = `id, email, email_verified_at, phone, name, password_hash, role, status, totp_secret, totp_enabled,
 recovery_codes, tier, pro_until, pro_autorenew, pro_period, referral_code, referred_by, referral_rewarded, risk_profile,
-kyc_status, telegram_chat_id, telegram_username, notify_email, notify_telegram, notify_market, created_at, last_login_at, totp_last_step, onboarded_at`
+kyc_status, telegram_chat_id, telegram_username, notify_email, notify_telegram, notify_market, created_at, last_login_at, totp_last_step, onboarded_at, phone_verified_at`
+
+// userColsU — те же колонки с префиксом таблицы u (для JOIN).
+var userColsU = "u." + strings.ReplaceAll(strings.Join(strings.Fields(userCols), " "), ", ", ", u.")
 
 type scanner interface{ Scan(...any) error }
 
 func scanUser(r scanner) (*User, error) {
 	var u User
-	var verified, proUntil, refBy, tg, lastLogin, onboarded sql.NullInt64
+	var verified, proUntil, refBy, tg, lastLogin, onboarded, phoneVerified sql.NullInt64
 	err := r.Scan(&u.ID, &u.Email, &verified, &u.Phone, &u.Name, &u.PasswordHash, &u.Role, &u.Status, &u.TOTPSecret,
 		&u.TOTPEnabled, &u.RecoveryCodes, &u.Tier, &proUntil, &u.ProAutorenew, &u.ProPeriod, &u.ReferralCode, &refBy,
 		&u.ReferralRewarded, &u.RiskProfile, &u.KYCStatus, &tg, &u.TelegramUsername, &u.NotifyEmail, &u.NotifyTelegram,
-		&u.NotifyMarket, &u.CreatedAt, &lastLogin, &u.TOTPLastStep, &onboarded)
+		&u.NotifyMarket, &u.CreatedAt, &lastLogin, &u.TOTPLastStep, &onboarded, &phoneVerified)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -96,6 +101,8 @@ func scanUser(r scanner) (*User, error) {
 	u.EmailVerified = verified.Valid
 	u.ProUntil, u.ReferredBy, u.TelegramChatID, u.LastLoginAt = nullInt(proUntil), nullInt(refBy), nullInt(tg), nullInt(lastLogin)
 	u.OnboardedAt = nullInt(onboarded)
+	u.PhoneVerified = phoneVerified.Valid && u.Phone != ""
+	u.HasPassword = u.PasswordHash != ""
 	return &u, nil
 }
 
@@ -156,7 +163,7 @@ func (s *Store) UpdateUserFields(ctx context.Context, id int64, fields map[strin
 	allowed := map[string]bool{"name": true, "phone": true, "password_hash": true, "totp_secret": true, "totp_enabled": true,
 		"recovery_codes": true, "tier": true, "pro_until": true, "pro_autorenew": true, "pro_period": true, "risk_profile": true,
 		"kyc_status": true, "telegram_chat_id": true, "telegram_username": true, "notify_email": true, "notify_telegram": true,
-		"notify_market": true, "status": true, "role": true, "email_verified_at": true, "last_login_at": true, "referral_rewarded": true, "email": true, "totp_last_step": true, "onboarded_at": true}
+		"notify_market": true, "status": true, "role": true, "email_verified_at": true, "last_login_at": true, "referral_rewarded": true, "email": true, "totp_last_step": true, "onboarded_at": true, "phone_verified_at": true}
 	var sets []string
 	var args []any
 	for k, v := range fields {

@@ -248,7 +248,9 @@ func TestKYCViaMSISandbox(t *testing.T) {
 	if code := c.do("POST", "/api/v1/kyc", map[string]any{}, nil); code != 409 {
 		t.Fatalf("анкета: %d", code)
 	}
-	var st struct{ RedirectURL string `json:"redirect_url"` }
+	var st struct {
+		RedirectURL string `json:"redirect_url"`
+	}
 	c.do("POST", "/api/v1/kyc/msi/start", map[string]any{}, &st)
 	state := strings.TrimPrefix(st.RedirectURL, "/verify/msi-sandbox?state=")
 	if state == "" || state == st.RedirectURL {
@@ -260,7 +262,9 @@ func TestKYCViaMSISandbox(t *testing.T) {
 	if code := c.do("POST", "/api/v1/kyc/msi/sandbox", map[string]any{"state": state, "personal_number": "3010195A001PB7", "code": "123456"}, nil); code != 200 {
 		t.Fatalf("мси: %d", code)
 	}
-	var k struct{ KYC store.KYC `json:"kyc"` }
+	var k struct {
+		KYC store.KYC `json:"kyc"`
+	}
 	c.do("GET", "/api/v1/kyc", nil, &k)
 	if k.KYC.Status != "approved" || k.KYC.Method != "msi-sandbox" || k.KYC.BirthDate != "1995-01-01" || k.KYC.LastName != "Петров" {
 		t.Fatalf("%+v", k.KYC)
@@ -272,7 +276,9 @@ func TestKYCViaMSISandbox(t *testing.T) {
 	// чужой state не подходит
 	c2 := newClient(t, srv.URL)
 	c2.register("other@test.by")
-	var st2 struct{ RedirectURL string `json:"redirect_url"` }
+	var st2 struct {
+		RedirectURL string `json:"redirect_url"`
+	}
 	c2.do("POST", "/api/v1/kyc/msi/start", map[string]any{}, &st2)
 	if code := c.do("POST", "/api/v1/kyc/msi/sandbox", map[string]any{"state": strings.TrimPrefix(st2.RedirectURL, "/verify/msi-sandbox?state="), "personal_number": "3020195A001PB7", "code": "123456"}, nil); code == 200 {
 		t.Fatal("чужой state принят")

@@ -1,7 +1,7 @@
-import { useEffect, useState, type FormEvent } from "react";
-import { Link, NavLink, useNavigate, useParams } from "react-router-dom";
+import { useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { Link, NavLink, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import QRCode from "qrcode";
-import { ChevronRight, Copy, Download, KeyRound, LogOut, Monitor, Smartphone } from "lucide-react";
+import { ChevronRight, Copy, Download, KeyRound, LogOut, Mail, Monitor, Smartphone } from "lucide-react";
 import { api } from "../../lib/api";
 import { ago, byn, date, dateTime } from "../../lib/format";
 import { useLoad, useSubmit, useTitle } from "../../lib/hooks";
@@ -10,6 +10,7 @@ import type { AuditEvent, Consent, KYC, Me, Payment, Session } from "../../lib/t
 import { Button, Field, Input, LoadError, Modal, Notice, PageLoader, Switch, useToast } from "../../components/ui";
 import { DatePicker, isoDate } from "../../components/DatePicker";
 import { VerificationPanel } from "./Verify";
+import { AppleMark, GoogleMark } from "../../components/SocialLogin";
 import { LogoutButton } from "../../components/layout";
 
 const TABS = [
@@ -28,7 +29,7 @@ export default function Profile() {
         <nav className="profile-nav" aria-label="Разделы профиля">
           {TABS.map(([k, l]) => <NavLink key={k} to={`/app/profile/${k}`}>{l}{k === "verification" && <KycBadge />}</NavLink>)}
         </nav>
-        <div className="stack g16">
+        <div key={tab} className="stack g16 tab-anim">
           {tab === "personal" && <Personal />}
           {tab === "verification" && <Verification />}
           {tab === "security" && <Security />}
@@ -215,6 +216,8 @@ function Security() {
         <ChevronRight className="sec-go" />
       </Link>
 
+      <LoginMethods />
+
       <section className="sheet">
         <div className="sheet-head"><h2>Двухфакторная защита</h2>{u.totp_enabled ? <span className="badge badge-up">Включена</span> : <span className="badge">Выключена</span>}</div>
         <div className="sheet-body stack g16">
@@ -330,6 +333,8 @@ function Security() {
 
 function PasswordTab() {
   const toast = useToast();
+  const { me, reload } = useSession();
+  const hasPw = me?.user?.has_password !== false;
   const [pw, setPw] = useState({ current: "", next: "", again: "" });
   const s = useSubmit();
   const mismatch = !!pw.again && pw.next !== pw.again;
@@ -340,19 +345,95 @@ function PasswordTab() {
       try {
         await s.submit(() => api.post("/me/password", { current: pw.current, new: pw.next }));
         setPw({ current: "", next: "", again: "" });
-        toast("Пароль изменён, другие устройства вышли из аккаунта");
+        toast(hasPw ? "Пароль изменён, другие устройства вышли из аккаунта" : "Пароль задан — теперь можно входить и по почте");
+        reload();
       } catch { /* */ }
     }}>
-      <div className="sheet-head"><h2>Смена пароля</h2></div>
+      <div className="sheet-head"><h2>{hasPw ? "Смена пароля" : "Задайте пароль"}</h2></div>
       <div className="sheet-body stack g16" style={{ maxWidth: 480 }}>
-        <Field label="Текущий пароль" error={s.fieldError("current")}><Input type="password" autoComplete="current-password" value={pw.current} onChange={(e) => setPw({ ...pw, current: e.target.value })} /></Field>
+        {!hasPw && <Notice kind="info">Вы входите через Google, Apple или по телефону. Пароль нужен для вывода денег и как запасной способ входа.</Notice>}
+        {hasPw && <Field label="Текущий пароль" error={s.fieldError("current")}><Input type="password" autoComplete="current-password" value={pw.current} onChange={(e) => setPw({ ...pw, current: e.target.value })} /></Field>}
         <Field label="Новый пароль" error={s.fieldError("new")} hint="Не короче 8 символов, буквы и цифры"><Input type="password" autoComplete="new-password" value={pw.next} onChange={(e) => setPw({ ...pw, next: e.target.value })} /></Field>
         <Field label="Новый пароль ещё раз" error={mismatch ? "Пароли не совпадают" : undefined}><Input type="password" autoComplete="new-password" value={pw.again} onChange={(e) => setPw({ ...pw, again: e.target.value })} /></Field>
         {s.error && !s.field && <Notice kind="error">{s.error}</Notice>}
-        <Notice kind="plain">После смены пароля все другие устройства выйдут из аккаунта.</Notice>
-        <div><Button type="submit" variant="primary" busy={s.busy} disabled={!pw.current || !pw.next || pw.next !== pw.again}>Сменить пароль</Button></div>
+        {hasPw && <Notice kind="plain">После смены пароля все другие устройства выйдут из аккаунта.</Notice>}
+        <div><Button type="submit" variant="primary" busy={s.busy} disabled={(hasPw && !pw.current) || !pw.next || pw.next !== pw.again}>{hasPw ? "Сменить пароль" : "Задать пароль"}</Button></div>
       </div>
     </form>
+  );
+}
+
+// Способы входа: почта и пароль, телефон с кодом, Google, Apple.
+type Ident = { provider: string; email: string; created_at: number };
+type IdentResp = { identities: Ident[]; has_password: boolean; phone: string; phone_verified: boolean; providers: { google: string; apple: string; phone: string } };
+
+function LoginMethods() {
+  const toast = useToast();
+  const { reload: reloadMe } = useSession();
+  const [sp, setSp] = useSearchParams();
+  const d = useLoad(() => api.get<IdentResp>("/me/identities"), []);
+  const [phoneOpen, setPhoneOpen] = useState(false);
+  useEffect(() => {
+    const ok = sp.get("oauth"), bad = sp.get("oauth_error");
+    if (ok === "linked") toast("Способ входа привязан");
+    if (bad) toast(bad === "taken" ? "Этот аккаунт Google/Apple уже привязан к другому пользователю" : bad === "cancel" ? "Привязка отменена" : "Не удалось привязать, попробуйте ещё раз", bad === "cancel" ? "ok" : "error");
+    if (ok || bad) setSp({}, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  if (!d.data) return null;
+  const x = d.data;
+  const has = (p: string) => x.identities.find((i) => i.provider === p);
+  const unlink = async (p: string) => {
+    try { await api.del(`/me/identities/${p}`); d.reload(); toast("Отвязано"); } catch (e: any) { toast(e.message, "error"); }
+  };
+  const Row = ({ icon, title, sub, action }: { icon: ReactNode; title: string; sub: string; action: ReactNode }) => (
+    <div className="list-row lm-row"><span className="lm-ic">{icon}</span><div className="grow"><div className="title">{title}</div><div className="sub">{sub}</div></div>{action}</div>
+  );
+  return (
+    <section className="sheet">
+      <div className="sheet-head"><h2>Способы входа</h2></div>
+      <div className="list">
+        <Row icon={<Mail />} title="Почта и пароль" sub={x.has_password ? "Пароль задан" : "Пароль не задан"} action={<Link className="btn btn-secondary btn-sm" to="/app/profile/password">{x.has_password ? "Сменить" : "Задать"}</Link>} />
+        {x.providers.phone !== "off" && (
+          <Row icon={<Smartphone />} title="Телефон и код" sub={x.phone_verified ? `${x.phone} · подтверждён` : x.phone ? `${x.phone} · не подтверждён` : "Номер не указан"}
+            action={<Button size="sm" variant={x.phone_verified ? "secondary" : "primary"} onClick={() => setPhoneOpen(true)}>{x.phone_verified ? "Сменить" : "Подтвердить"}</Button>} />
+        )}
+        {(["google", "apple"] as const).filter((p) => x.providers[p] !== "off").map((p) => {
+          const i = has(p);
+          return (
+            <Row key={p} icon={p === "google" ? <GoogleMark /> : <AppleMark />} title={p === "google" ? "Google" : "Apple ID"} sub={i ? (i.email || "Привязан") : "Не привязан"}
+              action={i ? <Button size="sm" variant="ghost" onClick={() => unlink(p)}>Отвязать</Button> : <a className="btn btn-secondary btn-sm" href={`/oauth/${p}/start?mode=link`}>Привязать</a>} />
+          );
+        })}
+      </div>
+      <PhoneModal open={phoneOpen} initial={x.phone} onClose={() => setPhoneOpen(false)} onDone={() => { setPhoneOpen(false); d.reload(); reloadMe(); toast("Номер подтверждён — теперь можно входить по коду"); }} />
+    </section>
+  );
+}
+
+function PhoneModal({ open, initial, onClose, onDone }: { open: boolean; initial: string; onClose: () => void; onDone: () => void }) {
+  const [phone, setPhone] = useState(initial);
+  const [sent, setSent] = useState<null | { test_code?: string; via?: string }>(null);
+  const [code, setCode] = useState("");
+  const s = useSubmit();
+  useEffect(() => { if (open) { setPhone(initial); setSent(null); setCode(""); s.reset(); } /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [open]);
+  return (
+    <Modal open={open} onClose={onClose} title="Подтверждение номера">
+      <form className="stack g16" onSubmit={async (e) => {
+        e.preventDefault();
+        try {
+          if (!sent) setSent((await s.submit(() => api.post<{ test_code?: string; via?: string }>("/me/phone/code", { phone }))) || null);
+          else { await s.submit(() => api.post("/me/phone/verify", { phone, code })); onDone(); }
+        } catch { /* */ }
+      }}>
+        <p className="muted" style={{ margin: 0 }}>После подтверждения можно входить по номеру и коду, без пароля.</p>
+        <Field label="Номер телефона" error={s.fieldError("phone")}><Input type="tel" value={phone} disabled={!!sent} onChange={(e) => setPhone(e.target.value)} placeholder="+375 (29) 123-45-67" autoFocus /></Field>
+        {sent && <Field label={sent.via === "telegram" ? "Код из Telegram" : "Код из SMS"} error={s.fieldError("code")}><Input inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))} autoFocus /></Field>}
+        {sent?.test_code && <Notice kind="warn">Тестовый режим: SMS не отправляется, код — <b className="num">{sent.test_code}</b></Notice>}
+        {s.error && !s.field && <Notice kind="error">{s.error}</Notice>}
+        <div className="row g8" style={{ justifyContent: "flex-end" }}><Button onClick={onClose}>Отмена</Button><Button type="submit" variant="primary" busy={s.busy}>{sent ? "Подтвердить" : "Получить код"}</Button></div>
+      </form>
+    </Modal>
   );
 }
 
@@ -398,12 +479,17 @@ function NotifySettings() {
   const { me, setMe, config } = useSession();
   const toast = useToast();
   const u = me!.user!;
+  // переключатель двигается сразу, запрос идёт следом; при ошибке — откат
   const upd = async (k: string, v: boolean) => {
-    try { setMe(await api.patch<Me>("/me/notifications", { [k]: v })); } catch (e: any) { toast(e.message, "error"); }
+    const prev = me!;
+    setMe({ ...prev, user: { ...prev.user!, [k]: v } });
+    try { setMe(await api.patch<Me>("/me/notifications", { [k]: v })); } catch (e: any) { setMe(prev); toast(e.message, "error"); }
   };
+  const nav = useNavigate();
   const link = async () => {
     try {
-      const r = await api.post<{ url: string }>("/telegram/link");
+      const r = await api.post<{ url: string; test?: string }>("/telegram/link");
+      if (r.test) { nav(r.url); return; } // тестовый Telegram открывается прямо в кабинете
       window.open(r.url, "_blank", "noopener");
       toast("Откройте Telegram и нажмите «Старт»");
     } catch (e: any) { toast(e.message, "error"); }
@@ -415,12 +501,15 @@ function NotifySettings() {
         <div className="sheet-body stack g12">
           {me?.telegram_linked ? (
             <div className="row between wrap g12">
-              <span>Уведомления приходят в Telegram{u.telegram_username ? ` @${u.telegram_username}` : ""}. В боте: /balance, /plans.</span>
-              <Button size="sm" onClick={async () => setMe(await api.del<Me>("/telegram/link"))}>Отключить</Button>
+              <span>Уведомления приходят в Telegram{u.telegram_username ? ` @${u.telegram_username}` : ""}. В боте: баланс, копилки, пауза, операции и поддержка.</span>
+              <div className="row g8">
+                {config?.telegram_test && <Button size="sm" variant="primary" onClick={() => nav("/telegram-sandbox")}>Открыть чат с ботом</Button>}
+                <Button size="sm" onClick={async () => setMe(await api.del<Me>("/telegram/link"))}>Отключить</Button>
+              </div>
             </div>
           ) : config?.telegram_bot ? (
             <div className="row between wrap g12">
-              <span className="muted">Чеки о пополнениях и ответы поддержки — сразу в мессенджер через бота @{config.telegram_bot}.</span>
+              <span className="muted">Баланс, копилки, пауза одной кнопкой, чеки о пополнениях и ответы поддержки — в боте @{config.telegram_bot}.{config.telegram_test ? " Сейчас тестовый режим: бот откроется прямо здесь." : ""}</span>
               <Button variant="primary" size="sm" onClick={link}>Подключить Telegram</Button>
             </div>
           ) : (

@@ -22,6 +22,7 @@ import (
 	"autoinvest/internal/market"
 	"autoinvest/internal/notify"
 	"autoinvest/internal/payments"
+	"autoinvest/internal/sms"
 	"autoinvest/internal/store"
 	"autoinvest/internal/telegram"
 )
@@ -42,12 +43,15 @@ type Server struct {
 	Sandbox *payments.Sandbox
 	N       *notify.Notifier
 	Bot     *telegram.Bot
+	TG      *telegram.Sandbox // тестовый Telegram (только при разработке)
+	SMS     sms.Sender
 	Log     *slog.Logger
 	Static  fs.FS
 	Version string
 	Started time.Time
 
 	limiter *limiter
+	smsOnce sync.Once
 	statsMu sync.Mutex
 	stats   map[string]statsEntry
 	showMu  sync.Mutex
@@ -98,6 +102,12 @@ func (s *Server) routes(m *http.ServeMux) {
 	pub("POST /api/v1/auth/verify-email", s.verifyEmail)
 	pub("POST /api/v1/auth/forgot", s.forgot)
 	pub("POST /api/v1/auth/reset", s.reset)
+	pub("POST /api/v1/auth/phone/code", s.phoneLoginCode)
+	pub("POST /api/v1/auth/phone/login", s.phoneLogin)
+	pub("GET /oauth/{provider}/start", s.oauthStart)
+	pub("GET /oauth/google/callback", s.oauthGoogleCallback)
+	pub("POST /oauth/apple/callback", s.oauthAppleCallback)
+	pub("POST /oauth/sandbox/callback", s.oauthSandboxCallback)
 	user("POST /api/v1/auth/resend-verification", s.resendVerification)
 
 	// профиль и безопасность
@@ -119,6 +129,10 @@ func (s *Server) routes(m *http.ServeMux) {
 	user("PATCH /api/v1/me/notifications", s.updateNotifySettings)
 	user("POST /api/v1/me/risk", s.submitRisk)
 	user("GET /api/v1/me/audit", s.audit)
+	user("GET /api/v1/me/identities", s.identities)
+	user("DELETE /api/v1/me/identities/{provider}", s.unlinkIdentity)
+	user("POST /api/v1/me/phone/code", s.phoneVerifyCode)
+	user("POST /api/v1/me/phone/verify", s.phoneVerify)
 	user("GET /api/v1/me/audit/export.csv", s.exportAudit)
 	user("POST /api/v1/me/delete", s.deleteAccount)
 	user("GET /api/v1/kyc", s.getKYC)
@@ -131,6 +145,9 @@ func (s *Server) routes(m *http.ServeMux) {
 	user("POST /api/v1/kyc/docs/sandbox", s.docsSandbox)
 	user("POST /api/v1/telegram/link", s.telegramLink)
 	user("DELETE /api/v1/telegram/link", s.telegramUnlink)
+	user("GET /api/v1/telegram/sandbox", s.tgSandboxMessages)
+	user("POST /api/v1/telegram/sandbox/send", s.tgSandboxSend)
+	user("POST /api/v1/telegram/sandbox/press", s.tgSandboxPress)
 	user("GET /api/v1/referral", s.referral)
 	user("GET /api/v1/billing", s.billing)
 	user("POST /api/v1/billing/pro", s.buyPro)

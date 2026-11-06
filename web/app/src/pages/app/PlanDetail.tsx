@@ -139,7 +139,7 @@ export default function PlanDetail() {
         </section>
         <section className="sheet pd-side">
           <div className="sheet-head"><h2>Пополнения</h2>{!closed && <Button size="sm" variant="ghost" icon={<Pencil />} onClick={() => setModal("edit")}>Изменить</Button>}</div>
-          <div className="sheet-body stack g12">
+          <div className="sheet-body">
             {p.status === "active" && p.next_runs.length ? (
               p.next_runs.map((t, i) => <div key={t} className={`pd-run ${i ? "muted" : ""}`}><span>{when(t)}</span><Money k={p.amount_kop} /></div>)
             ) : <div className="muted">{closed ? "Копилка закрыта" : p.frequency === "manual" ? "Пополнения только вручную" : "Копилка на паузе"}</div>}

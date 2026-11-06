@@ -29,6 +29,8 @@ const Onboarding = lazy(() => import("./pages/app/Onboarding"));
 const Cards = lazy(() => import("./pages/app/Cards"));
 const SandboxPay = lazy(() => import("./pages/app/SandboxPay"));
 const MsiSandbox = lazy(() => import("./pages/app/Verify"));
+const OAuthSandbox = lazy(() => import("./pages/public/OAuthSandbox"));
+const TelegramSandbox = lazy(() => import("./pages/app/TelegramSandbox"));
 const Notifications = lazy(() => import("./pages/app/Notifications"));
 const Profile = lazy(() => import("./pages/app/Profile"));
 const Support = lazy(() => import("./pages/app/Support").then((m) => ({ default: m.Support })));
@@ -65,6 +67,8 @@ createRoot(document.getElementById("root")!).render(
               </Route>
               <Route path="pay/sandbox/:ref" element={<RequireAuth><SandboxPay /></RequireAuth>} />
               <Route path="verify/msi-sandbox" element={<RequireAuth><MsiSandbox /></RequireAuth>} />
+              <Route path="oauth-sandbox" element={<OAuthSandbox />} />
+              <Route path="telegram-sandbox" element={<RequireAuth><TelegramSandbox /></RequireAuth>} />
               <Route path="app" element={<RequireAuth><AppShell /></RequireAuth>}>
                 <Route index element={<Home />} />
                 <Route path="plans" element={<Plans />} />

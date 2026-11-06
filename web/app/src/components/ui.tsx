@@ -1,3 +1,4 @@
+import { createPortal } from "react-dom";
 import { cloneElement, createContext, isValidElement, useCallback, useContext, useEffect, useId, useRef, useState, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode } from "react";
 import { AlertCircle, CheckCircle2, ChevronDown, Info, MoreHorizontal, X, TriangleAlert, Car, GraduationCap, Gift, Heart, Home, Laptop, PiggyBank, Plane, Rocket, Shield } from "lucide-react";
 import { kop, pct, RUB } from "../lib/format";
@@ -204,7 +205,7 @@ export function OrderStatus({ s }: { s: string }) {
 }
 
 export function PlanStatus({ s }: { s: string }) {
-  if (s === "active") return <span className="badge badge-up"><span className="dot" style={{ background: "var(--up)" }} />Работает</span>;
+  if (s === "active") return <span className="badge badge-up">Работает</span>;
   if (s === "paused") return <span className="badge">На паузе</span>;
   return <span className="badge">Закрыта</span>;
 }
@@ -242,7 +243,8 @@ export function Modal({ open, onClose, title, children, wide }: { open: boolean;
   }, [open]);
   if (!open && !mounted) return null;
   const view = open ? { title, children } : last.current;
-  return (
+  // окно рисуем в body: иначе родитель с transform (анимации появления) становится его рамкой и затемнение не на весь экран
+  return createPortal(
     <div className={`modal-backdrop ${open ? "" : "closing"}`} onMouseDown={(e) => open && e.target === e.currentTarget && onClose()} inert={!open}>
       <div className={`modal ${wide ? "wide" : ""}`} role="dialog" aria-modal="true" aria-label={typeof view.title === "string" ? view.title : undefined} ref={ref}>
         <div className="modal-head">
@@ -251,7 +253,8 @@ export function Modal({ open, onClose, title, children, wide }: { open: boolean;
         </div>
         <div className="modal-body">{view.children}</div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 

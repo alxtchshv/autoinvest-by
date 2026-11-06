@@ -17,10 +17,11 @@ export type Config = {
   fee_free_bp: number; fee_pro_bp: number; spread_bp: number; pro_month_kop: number; pro_year_kop: number;
   min_contrib_kop: number; max_contrib_kop: number; free_plan_limit: number; pro_plan_limit: number; require_kyc: boolean;
   assets: Asset[]; strategies: Strategy[]; version: string; legal_version: string;
+  telegram_test?: boolean; auth?: { google: "sandbox" | "on" | "off"; apple: "sandbox" | "on" | "off"; phone: string };
 };
 
 export type User = {
-  id: number; email: string; email_verified: boolean; phone: string; name: string; role: "user" | "support" | "admin";
+  id: number; email: string; email_verified: boolean; phone: string; phone_verified?: boolean; has_password?: boolean; name: string; role: "user" | "support" | "admin";
   status: string; totp_enabled: boolean; tier: string; pro_until: number | null; pro_autorenew: boolean; pro_period: string;
   referral_code: string; risk_profile: string; kyc_status: "none" | "pending" | "approved" | "rejected"; telegram_username: string;
   notify_email: boolean; notify_telegram: boolean; notify_market: boolean; created_at: number; last_login_at: number | null; onboarded_at: number | null;

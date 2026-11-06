@@ -64,30 +64,45 @@ type Config struct {
 	AdminEmail    string
 	AdminPassword string
 
-	RequireKYC     bool
-	KYCDocs        string // sandbox | sumsub | manual — проверка по паспорту и селфи
-	MSIMode        string // sandbox | oauth | off — вход через межбанковскую систему идентификации
-	SumsubBase     string
-	SumsubToken    string
-	SumsubSecret   string
-	SumsubHook     string // секрет вебхука (X-Payload-Digest)
-	SumsubLevel    string
-	MSIAuthURL     string
-	MSITokenURL    string
-	MSIUserURL     string
-	MSIClientID    string
-	MSISecret      string
-	MSIScope       string
-	FeeFreeBP      int64 // комиссия сервиса за покупку, базисные пункты (100 = 1%)
-	FeeProBP       int64
-	SpreadBP       int64 // спред партнёра к рыночной цене
-	ProMonthKop    int64
-	ProYearKop     int64
-	MinContribKop  int64
-	MaxContribKop  int64
-	FreePlanLimit  int
-	ProPlanLimit   int
-	SchedulerEvery time.Duration
+	RequireKYC   bool
+	KYCDocs      string // sandbox | sumsub | manual — проверка по паспорту и селфи
+	MSIMode      string // sandbox | oauth | off — вход через межбанковскую систему идентификации
+	SumsubBase   string
+	SumsubToken  string
+	SumsubSecret string
+	SumsubHook   string // секрет вебхука (X-Payload-Digest)
+	SumsubLevel  string
+	MSIAuthURL   string
+	MSITokenURL  string
+	MSIUserURL   string
+	MSIClientID  string
+	MSISecret    string
+	MSIScope     string
+
+	OAuthGoogle        string // sandbox | on | off
+	GoogleClientID     string
+	GoogleClientSecret string
+	OAuthApple         string // sandbox | on | off
+	AppleClientID      string // Services ID
+	AppleTeamID        string
+	AppleKeyID         string
+	ApplePrivateKey    string // содержимое .p8
+
+	SMSProvider     string // sandbox | telegram | http | off — коды для входа по телефону
+	TGGatewayKey    string
+	SMSHTTPURL      string
+	SMSHTTPToken    string
+	TelegramSandbox bool  // встроенный тестовый Telegram (без токена бота) — только не в продакшене
+	FeeFreeBP       int64 // комиссия сервиса за покупку, базисные пункты (100 = 1%)
+	FeeProBP        int64
+	SpreadBP        int64 // спред партнёра к рыночной цене
+	ProMonthKop     int64
+	ProYearKop      int64
+	MinContribKop   int64
+	MaxContribKop   int64
+	FreePlanLimit   int
+	ProPlanLimit    int
+	SchedulerEvery  time.Duration
 }
 
 // Load читает .env (если есть) и окружение.
@@ -149,6 +164,39 @@ func Load() (*Config, error) {
 		msi = "oauth"
 	}
 	c.KYCDocs, c.MSIMode = env("KYC_DOCS", docs), env("MSI_MODE", msi)
+
+	c.GoogleClientID, c.GoogleClientSecret = env("GOOGLE_CLIENT_ID", ""), env("GOOGLE_CLIENT_SECRET", "")
+	c.AppleClientID, c.AppleTeamID, c.AppleKeyID = env("APPLE_CLIENT_ID", ""), env("APPLE_TEAM_ID", ""), env("APPLE_KEY_ID", "")
+	c.ApplePrivateKey = strings.ReplaceAll(env("APPLE_PRIVATE_KEY", ""), `\n`, "\n")
+	if f := env("APPLE_PRIVATE_KEY_FILE", ""); f != "" && c.ApplePrivateKey == "" {
+		if b, err := os.ReadFile(f); err == nil {
+			c.ApplePrivateKey = string(b)
+		}
+	}
+	mode := func(key string, has bool) string {
+		def := "sandbox"
+		if c.Env == "production" {
+			def = "off"
+		}
+		if has {
+			def = "on"
+		}
+		return env(key, def)
+	}
+	c.OAuthGoogle = mode("OAUTH_GOOGLE", c.GoogleClientID != "")
+	c.OAuthApple = mode("OAUTH_APPLE", c.AppleClientID != "")
+	c.TGGatewayKey, c.SMSHTTPURL, c.SMSHTTPToken = env("TELEGRAM_GATEWAY_TOKEN", ""), env("SMS_HTTP_URL", ""), env("SMS_HTTP_TOKEN", "")
+	sms := "sandbox"
+	switch {
+	case c.TGGatewayKey != "":
+		sms = "telegram"
+	case c.SMSHTTPURL != "":
+		sms = "http"
+	case c.Env == "production":
+		sms = "off"
+	}
+	c.SMSProvider = env("SMS_PROVIDER", sms)
+	c.TelegramSandbox = envBool("TELEGRAM_SANDBOX", c.TelegramToken == "" && c.Env != "production")
 	c.SecureCookies = strings.HasPrefix(c.PublicURL, "https://")
 	return c, c.validate()
 }
@@ -193,6 +241,36 @@ func (c *Config) validate() error {
 		}
 	default:
 		return fmt.Errorf("неизвестный MSI_MODE=%q (sandbox|oauth|off)", c.MSIMode)
+	}
+	for name, v := range map[string]string{"OAUTH_GOOGLE": c.OAuthGoogle, "OAUTH_APPLE": c.OAuthApple} {
+		if v != "sandbox" && v != "on" && v != "off" {
+			return fmt.Errorf("неизвестный %s=%q (sandbox|on|off)", name, v)
+		}
+		if c.Env == "production" && v == "sandbox" {
+			return fmt.Errorf("%s=sandbox недоступен при APP_ENV=production", name)
+		}
+	}
+	if c.OAuthGoogle == "on" && (c.GoogleClientID == "" || c.GoogleClientSecret == "") {
+		return errors.New("OAUTH_GOOGLE=on требует GOOGLE_CLIENT_ID и GOOGLE_CLIENT_SECRET")
+	}
+	if c.OAuthApple == "on" && (c.AppleClientID == "" || c.AppleTeamID == "" || c.AppleKeyID == "" || c.ApplePrivateKey == "") {
+		return errors.New("OAUTH_APPLE=on требует APPLE_CLIENT_ID, APPLE_TEAM_ID, APPLE_KEY_ID и APPLE_PRIVATE_KEY(_FILE)")
+	}
+	switch c.SMSProvider {
+	case "sandbox", "off":
+	case "telegram":
+		if c.TGGatewayKey == "" {
+			return errors.New("SMS_PROVIDER=telegram требует TELEGRAM_GATEWAY_TOKEN")
+		}
+	case "http":
+		if c.SMSHTTPURL == "" {
+			return errors.New("SMS_PROVIDER=http требует SMS_HTTP_URL")
+		}
+	default:
+		return fmt.Errorf("неизвестный SMS_PROVIDER=%q (sandbox|telegram|http|off)", c.SMSProvider)
+	}
+	if c.Env == "production" && (c.SMSProvider == "sandbox" || c.TelegramSandbox) {
+		return errors.New("тестовые SMS и тестовый Telegram недоступны при APP_ENV=production")
 	}
 	if c.Env == "production" && (c.KYCDocs == "sandbox" || c.MSIMode == "sandbox") {
 		return errors.New("тестовая проверка личности (KYC_DOCS/MSI_MODE=sandbox) недоступна при APP_ENV=production")

@@ -142,23 +142,34 @@ func main() {
 	}
 
 	var bot *telegram.Bot
-	if cfg.TelegramToken != "" {
+	var tgSandbox *telegram.Sandbox
+	switch {
+	case cfg.TelegramToken != "":
 		bot = telegram.New(cfg.TelegramToken, cfg.TelegramUsername, cfg.PublicURL, st, en, log)
+	case cfg.TelegramSandbox:
+		// без токена при разработке — встроенный тестовый Telegram: бот настоящий, «сервер Telegram» имитируется
+		tgSandbox = telegram.NewSandbox("autoinvest_test_bot")
+		bot = telegram.New("sandbox", tgSandbox.Username, cfg.PublicURL, st, en, log)
+		bot.API = "http://telegram.sandbox"
+		bot.UseTransport(tgSandbox.Transport())
+	}
+	if bot != nil {
+		bot.SupportChatID = cfg.SupportChatID
 		cctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 		if err := bot.Check(cctx); err != nil {
 			log.Warn("Telegram-бот не запущен", "err", err)
-			bot = nil
+			bot, tgSandbox = nil, nil
 		} else {
 			n.SetMessenger(bot)
 			go bot.Run(ctx)
-			log.Info("Telegram-бот запущен", "username", bot.Username)
+			log.Info("Telegram-бот запущен", "username", bot.Username, "test", tgSandbox != nil)
 		}
 		cancel()
 	}
 
 	go en.Run(ctx)
 
-	srv := &api.Server{Cfg: cfg, St: st, DB: d, Hub: hub, En: en, Pay: pay, Sandbox: sandbox, N: n, Bot: bot, Log: log,
+	srv := &api.Server{Cfg: cfg, St: st, DB: d, Hub: hub, En: en, Pay: pay, Sandbox: sandbox, N: n, Bot: bot, TG: tgSandbox, Log: log,
 		Static: web.Dist(), Version: version, Started: time.Now()}
 	if cfg.Market != "fixture" {
 		go srv.WarmShowcase(ctx)

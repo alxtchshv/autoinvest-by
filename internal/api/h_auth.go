@@ -47,6 +47,7 @@ func (s *Server) getConfig(w http.ResponseWriter, r *http.Request) {
 		"broker":          c.Broker,
 		"market_demo":     s.Hub.IsFixture(),
 		"telegram_bot":    s.botUsername(),
+		"telegram_test":   s.TG != nil,
 		"fee_free_bp":     c.FeeFreeBP,
 		"fee_pro_bp":      c.FeeProBP,
 		"spread_bp":       c.SpreadBP,
@@ -57,6 +58,7 @@ func (s *Server) getConfig(w http.ResponseWriter, r *http.Request) {
 		"free_plan_limit": c.FreePlanLimit,
 		"pro_plan_limit":  c.ProPlanLimit,
 		"require_kyc":     c.RequireKYC,
+		"auth":            map[string]string{"google": c.OAuthGoogle, "apple": c.OAuthApple, "phone": c.SMSProvider},
 		"assets":          market.Catalog,
 		"strategies":      market.Strategies,
 		"version":         s.Version,
@@ -184,17 +186,28 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	if !readJSON(w, r, &in) {
 		return
 	}
+	// в поле можно ввести почту или подтверждённый номер телефона
 	email := strings.ToLower(strings.TrimSpace(in.Email))
 	if !s.limiter.Allow("login:"+clientIP(r), 20, 15*time.Minute) || !s.limiter.Allow("login:"+email, 8, 15*time.Minute) {
 		writeErr(w, http.StatusTooManyRequests, "Слишком много попыток входа. Подождите 15 минут")
 		return
 	}
-	u, err := s.St.UserByEmail(r.Context(), email)
+	var u *store.User
+	var err error
+	if !strings.Contains(email, "@") && phoneRe.MatchString(normPhone(email)) {
+		u, err = s.St.UserByPhone(r.Context(), normPhone(email))
+	} else {
+		u, err = s.St.UserByEmail(r.Context(), email)
+	}
+	if err == nil && !u.HasPassword {
+		writeErr(w, http.StatusUnauthorized, "У этого аккаунта нет пароля — войдите через Google, Apple или по коду на телефон")
+		return
+	}
 	if err != nil || !auth.CheckPassword(u.PasswordHash, in.Password) {
 		if err == nil {
 			s.St.Audit(r.Context(), u.ID, 0, "auth.login_failed", "", clientIP(r))
 		}
-		writeErr(w, http.StatusUnauthorized, "Неверная почта или пароль")
+		writeErr(w, http.StatusUnauthorized, "Неверная почта, телефон или пароль")
 		return
 	}
 	if u.Status == "blocked" {

@@ -67,6 +67,8 @@ func (b *Binance) Quotes(ctx context.Context, assets []Asset) (map[string]Quote,
 		HighPrice          string `json:"highPrice"`
 		LowPrice           string `json:"lowPrice"`
 		QuoteVolume        string `json:"quoteVolume"`
+		BidPrice           string `json:"bidPrice"`
+		AskPrice           string `json:"askPrice"`
 	}
 	u := b.Base + "/api/v3/ticker/24hr?symbols=" + url.QueryEscape("["+strings.Join(syms, ",")+"]")
 	if err := getJSON(ctx, u, &rows); err != nil {
@@ -77,6 +79,11 @@ func (b *Binance) Quotes(ctx context.Context, assets []Asset) (map[string]Quote,
 	for _, r := range rows {
 		s, ok := bySym[r.Symbol]
 		if !ok || pf(r.LastPrice) <= 0 {
+			continue
+		}
+		// Торги по паре остановлены (статус BREAK): Binance продолжает отдавать последнюю цену, но стакан пуст.
+		// Такую цену брать нельзя — пусть котировку даст следующий источник.
+		if r.BidPrice != "" && pf(r.BidPrice) <= 0 && pf(r.AskPrice) <= 0 {
 			continue
 		}
 		out[s] = Quote{Symbol: s, PriceUSD: pf(r.LastPrice), Change24h: pf(r.PriceChangePercent),

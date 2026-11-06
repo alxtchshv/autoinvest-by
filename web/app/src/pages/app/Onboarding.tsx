@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { api } from "../../lib/api";
-import { byn } from "../../lib/format";
+import { byn, planName } from "../../lib/format";
 import { useSubmit, useTitle } from "../../lib/hooks";
 import { useSession } from "../../lib/session";
 import type { Plan, Strategy } from "../../lib/types";
@@ -21,7 +21,7 @@ type Rec = {
 
 export default function Onboarding() {
   useTitle("Подбор копилки");
-  const { me, reload } = useSession();
+  const { me, reload, config } = useSession();
   const nav = useNavigate();
   const [step, setStep] = useState(0);
   const [answers, setAnswers] = useState<number[]>([]);
@@ -71,12 +71,12 @@ export default function Onboarding() {
     return (
       <div className="onb">
         <section className="sheet sheet-pad stack g16">
-          <div className="small muted">Подходящая копилка</div>
-          <h1>{strategy.name}: «{rec.name}»</h1>
+          <div className="small muted">Подходящая копилка «{rec.name}»</div>
+          <h1>{planName(strategy.name)}</h1>
           <p className="muted">{strategy.description}</p>
           <div className="onb-alloc">
             {Object.entries(strategy.weights).sort((a, b) => b[1] - a[1]).map(([sym, w]) => (
-              <div key={sym} className="row g8"><AssetIcon symbol={sym} size="sm" /><span className="grow">{sym}</span><span className="num">{w / 100}%</span></div>
+              <div key={sym} className="row g8"><AssetIcon symbol={sym} size="sm" /><span className="grow">{config?.assets.find((a) => a.symbol === sym)?.name || sym}</span><span className="num">{w / 100}%</span></div>
             ))}
           </div>
           <div className="row g12 wrap small">

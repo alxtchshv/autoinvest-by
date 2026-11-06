@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { ArrowLeft } from "lucide-react";
 import { api, ApiError } from "../../lib/api";
-import { byn, freqLabel, kop, minuteStr, parseKop, WD_SHORT } from "../../lib/format";
+import { byn, freqLabel, kop, minuteStr, parseKop, WD_SHORT, planName } from "../../lib/format";
 import { useLoad, useSubmit, useTitle } from "../../lib/hooks";
 import { useSession } from "../../lib/session";
 import type { Alloc, Card, Plan } from "../../lib/types";
@@ -66,7 +66,7 @@ export function StrategyPicker({ strategy, allocations, onChange, isPro }: { str
           {config?.strategies.map((s) => (
             <button key={s.id} type="button" className="choice" aria-pressed={strategy === s.id} onClick={() => onChange(s.id, Object.entries(s.weights).map(([asset, weight_bp]) => ({ asset, weight_bp })).sort((a, b) => b.weight_bp - a.weight_bp))}>
               <div className="row between g12">
-                <b>{s.name}</b>
+                <b>{planName(s.name)}</b>
                 <span className="row g8 small muted"><RiskDots risk={s.risk} />{riskLabel(s.risk)} риск</span>
               </div>
               <div className="small muted mt8" style={{ marginTop: 4 }}>{s.description}</div>

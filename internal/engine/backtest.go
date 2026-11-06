@@ -189,6 +189,10 @@ type ShowcaseItem struct {
 	MaxDrawdown float64         `json:"max_drawdown"`
 	From        string          `json:"from"`
 	Points      []ShowcasePoint `json:"points"`
+	// Только для планов целиком в долларе: доходность там — это курсовая разница, поэтому показываем
+	// сколько долларов накоплено и сколько рублей дал рост курса (курс сегодня минус курс в дни покупок).
+	USDCents  int64 `json:"usd_cents,omitempty"`
+	FXGainKop int64 `json:"fx_gain_kop,omitempty"`
 }
 
 type ShowcasePoint struct {
@@ -197,8 +201,8 @@ type ShowcasePoint struct {
 	Value    int64 `json:"v"`
 }
 
-// showcaseNames — простые названия активов для витрины: человек, который видит сайт впервые, не обязан знать тикеры.
-var showcaseNames = map[string]string{"PAXG": "Золото", "BTC": "Биткоин", "ETH": "Эфир", "SOL": "Solana", "TON": "Toncoin"}
+// showcaseNames — оригинальные названия монет: так их узнают и так они называются на биржах.
+var showcaseNames = map[string]string{"PAXG": "PAX Gold", "BTC": "Bitcoin", "ETH": "Ethereum", "SOL": "Solana", "TON": "Toncoin"}
 
 // Showcase считает «что было бы» по всем готовым стратегиям и отдельным активам тарифа Старт на одинаковом
 // отрезке и сортирует по доходности. Варианты, у которых истории не хватает на весь срок (молодые активы),
@@ -240,6 +244,14 @@ func (e *Engine) Showcase(ctx context.Context, amountKop int64, years float64) (
 		for _, p := range r.Points {
 			it.Points = append(it.Points, ShowcasePoint{T: p.T, Invested: p.Invested, Value: p.Value})
 		}
+		if allStable(c.weights) {
+			if rt := e.Hub.USDRateOn(time.Now().UTC()); rt > 0 {
+				it.USDCents = int64(math.Round(float64(r.ValueKop) / rt))
+				// стоимость тех же долларов по курсу в дни покупок = вложено за вычетом комиссии и спреда
+				cost := float64(r.InvestedKop) * (1 - float64(e.Cfg.FeeFreeBP)/10000) / (1 + float64(e.Cfg.SpreadBP)/10000)
+				it.FXGainKop = r.ValueKop - int64(math.Round(cost))
+			}
+		}
 		out = append(out, it)
 	}
 	if len(out) == 0 {
@@ -250,4 +262,13 @@ func (e *Engine) Showcase(ctx context.Context, amountKop int64, years float64) (
 	}
 	sort.SliceStable(out, func(i, j int) bool { return out[i].ProfitPct > out[j].ProfitPct })
 	return out, nil
+}
+
+func allStable(w map[string]int64) bool {
+	for s, v := range w {
+		if a, ok := market.Find(s); !ok || (v > 0 && a.Kind != "stable") {
+			return false
+		}
+	}
+	return len(w) > 0
 }

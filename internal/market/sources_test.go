@@ -213,3 +213,39 @@ func TestYahooSkipsEmptyPoints(t *testing.T) {
 		t.Fatalf("%v %+v", err, q)
 	}
 }
+
+// partial — источник, который знает только часть монет (как Binance, когда торги одной из них остановлены).
+type partial struct {
+	name string
+	skip string
+	usd  float64
+}
+
+func (p partial) Name() string { return p.name }
+func (p partial) Quotes(ctx context.Context, assets []Asset) (map[string]Quote, error) {
+	out := map[string]Quote{}
+	for _, a := range assets {
+		if a.Kind == "crypto" || a.Kind == "gold" {
+			if a.Symbol != p.skip {
+				out[a.Symbol] = Quote{Symbol: a.Symbol, PriceUSD: p.usd, Source: p.name, UpdatedAt: time.Now()}
+			}
+		}
+	}
+	return out, nil
+}
+func (p partial) Candles(ctx context.Context, a Asset, interval string, limit int, start, end int64) ([]Candle, error) {
+	return nil, ErrUnavailable
+}
+
+func TestQuotesFallbackPerSymbol(t *testing.T) {
+	h := NewHub([]Source{partial{"main", "TON", 10}, partial{"backup", "", 20}}, FixtureRates{}, 100, false, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	h.refreshQuotes(context.Background())
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	if q := h.quotes["TON"]; q.Source != "backup" {
+		t.Errorf("TON must come from backup source, got %q", q.Source)
+	}
+	if q := h.quotes["BTC"]; q.Source != "main" {
+		t.Errorf("BTC must stay on main source, got %q", q.Source)
+	}
+}

@@ -104,8 +104,13 @@ export function Change({ v, k, className = "" }: { v?: number; k?: number; class
 
 const ICON_LABELS: Record<string, string> = { PAXG: "Au", USDT: "$", SPY: "500", BYCORP_USD: "$%", BYCORP_BYN: RUB + "%" };
 
+/** Настоящие логотипы монет (public/coins, см. README.txt там же); у остальных активов — буквенный значок. */
+const COIN_LOGOS: Record<string, string> = { BTC: "btc", ETH: "eth", SOL: "sol", USDT: "usdt", PAXG: "paxg", TON: "ton" };
+
 export function AssetIcon({ symbol, color, size }: { symbol: string; color?: string; size?: "sm" | "lg" }) {
   const { config } = useSession();
+  const logo = COIN_LOGOS[symbol];
+  if (logo) return <img className={`asset-ico asset-logo ${size || ""}`} src={`/coins/${logo}.svg`} alt="" aria-hidden draggable={false} />;
   const a = config?.assets.find((x) => x.symbol === symbol);
   const c = color || a?.color || "#8a919e";
   const label = ICON_LABELS[symbol] || symbol.slice(0, 3);

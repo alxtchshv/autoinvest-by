@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../../lib/api";
-import { byn, dateNum, kop, parseKop, pct } from "../../lib/format";
+import { byn, dateNum, kop, parseKop, pct, planName } from "../../lib/format";
 import { useTitle } from "../../lib/hooks";
 import { useSession } from "../../lib/session";
 import type { BacktestResult } from "../../lib/types";
@@ -24,7 +24,7 @@ export default function Calculator({ publicPage }: { publicPage?: boolean }) {
   const options = useMemo(() => {
     if (!config) return [];
     return [
-      ...config.strategies.map((s) => ({ id: s.id, label: s.name, weights: s.weights })),
+      ...config.strategies.map((s) => ({ id: s.id, label: planName(s.name), weights: s.weights })),
       ...config.assets.filter((a) => a.kind !== "stable").map((a) => ({ id: "a:" + a.symbol, label: "Только " + a.symbol, weights: { [a.symbol]: 10000 } })),
     ];
   }, [config]);

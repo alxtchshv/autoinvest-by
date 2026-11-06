@@ -147,6 +147,7 @@ button.list-row { width: 100%; border-left: 0; border-right: 0; border-bottom: 0
 .asset-ico { width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center; color: #fff; font-size: 12px; font-weight: 700; letter-spacing: -.02em; flex: none; }
 .asset-ico.sm { width: 26px; height: 26px; font-size: 10px; }
 .asset-ico.lg { width: 48px; height: 48px; font-size: 15px; }
+.asset-logo { display: block; object-fit: contain; background: none; }
 .plan-ico { width: 44px; height: 44px; border-radius: 12px; display: grid; place-items: center; background: var(--brand-soft); color: var(--brand-ink); flex: none; }
 .plan-ico svg { width: 22px; height: 22px; }
 

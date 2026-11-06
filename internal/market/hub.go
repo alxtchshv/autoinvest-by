@@ -36,10 +36,12 @@ type SourceStatus struct {
 type Hub struct {
 	sources  []Source
 	stockSrc Source // акции и фонды (Yahoo); опрашивается реже, чем крипта
-	rateSrc  RateSource
-	fixture  bool
-	spreadBP int64
-	log      *slog.Logger
+	// когда запасной источник котировок последний раз добирал пропуски (только из цикла refreshQuotes)
+	fallbackAt map[string]time.Time
+	rateSrc    RateSource
+	fixture    bool
+	spreadBP   int64
+	log        *slog.Logger
 
 	mu       sync.RWMutex
 	quotes   map[string]Quote
@@ -72,7 +74,7 @@ const ratesFreshFor = 26 * time.Hour
 func NewHub(sources []Source, rates RateSource, spreadBP int64, fixture bool, log *slog.Logger) *Hub {
 	h := &Hub{sources: sources, rateSrc: rates, spreadBP: spreadBP, fixture: fixture, log: log,
 		quotes: map[string]Quote{}, usdHist: map[string]float64{}, candles: map[candleKey]candleEntry{},
-		daily: map[string]candleEntry{}, status: map[string]*SourceStatus{}, subs: map[chan Event]struct{}{}}
+		daily: map[string]candleEntry{}, fallbackAt: map[string]time.Time{}, status: map[string]*SourceStatus{}, subs: map[chan Event]struct{}{}}
 	for _, s := range sources {
 		h.status[s.Name()] = &SourceStatus{Name: s.Name()}
 	}
@@ -241,18 +243,39 @@ func (h *Hub) loadHistory(ctx context.Context) {
 }
 
 func (h *Hub) refreshQuotes(ctx context.Context) {
-	var got map[string]Quote
-	for _, s := range h.sources {
+	// Источники идут по цепочке, и каждый следующий добирает только то, чего не дал предыдущий:
+	// если на Binance остановлены торги одной монетой, её цена придёт из Bybit или CoinGecko,
+	// а остальные останутся биржевыми.
+	got := map[string]Quote{}
+	want := 0
+	for _, a := range Catalog {
+		if a.Kind != "stable" && (a.Binance != "" || a.Bybit != "" || a.CoinGecko != "") {
+			want++
+		}
+	}
+	for i, s := range h.sources {
+		// запасные источники добирают пропуски не чаще раза в 30 секунд: у CoinGecko жёсткий лимит запросов,
+		// а котировка считается устаревшей только через 2 минуты
+		if i > 0 && len(got) > 0 && time.Since(h.fallbackAt[s.Name()]) < 30*time.Second {
+			continue
+		}
+		if i > 0 && len(got) > 0 {
+			h.fallbackAt[s.Name()] = time.Now()
+		}
 		c, cancel := context.WithTimeout(ctx, 8*time.Second)
 		q, err := s.Quotes(c, Catalog)
 		cancel()
 		h.mark(s.Name(), err)
-		if err == nil && len(q) > 0 {
-			got = q
-			break
-		}
 		if err != nil {
 			h.log.Debug("источник котировок недоступен", "source", s.Name(), "err", err)
+		}
+		for k, v := range q {
+			if _, ok := got[k]; !ok {
+				got[k] = v
+			}
+		}
+		if len(got) >= want {
+			break
 		}
 	}
 	h.mu.Lock()

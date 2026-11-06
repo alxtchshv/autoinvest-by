@@ -140,3 +140,6 @@ export function parseKop(s: string): number {
   if (!c || !/^\d+(\.\d{0,2})?$/.test(c)) return NaN;
   return Math.round(parseFloat(c) * 100);
 }
+
+/** Готовые наборы активов везде называем «План «Баланс»», чтобы «Доллар» как план не путали с валютой. */
+export const planName = (name: string) => `План «${name}»`;

@@ -3,20 +3,49 @@ import { Link, useLocation } from "react-router-dom";
 import { AreaSeries, ColorType, createChart, LineSeries, LineStyle, type UTCTimestamp } from "lightweight-charts";
 import { ArrowLeft, ArrowRight, Bell, Check, Lock, SlidersHorizontal } from "lucide-react";
 import { api } from "../../lib/api";
-import { byn, kop, pct, price, RUB } from "../../lib/format";
+import { byn, groupInt, kop, pct, planName, price, RUB } from "../../lib/format";
 import { useTitle } from "../../lib/hooks";
 import { useMarket, useSession } from "../../lib/session";
 import type { Strategy } from "../../lib/types";
 import { AssetIcon, Change, RiskDots, riskLabel } from "../../components/ui";
 
-/** Простые названия активов: на главной человек видит продукт впервые и не обязан знать тикеры. */
-const SIMPLE: Record<string, string> = { USDT: "Доллар", PAXG: "Золото", BTC: "Биткоин", ETH: "Эфир", SOL: "Solana", TON: "Toncoin" };
+/** Оригинальные названия активов — так их называют биржи и так их узнают. */
+function useAssetName() {
+  const { config } = useSession();
+  return (sym: string) => config?.assets.find((a) => a.symbol === sym)?.name || sym;
+}
 
 type ShowItem = {
   id: string; kind: "strategy" | "asset"; name: string; symbol?: string; color?: string; risk: number;
   invested_kop: number; value_kop: number; profit_pct: number; max_drawdown: number; from: string;
   points: { t: number; i: number; v: number }[];
+  usd_cents?: number; fx_gain_kop?: number;
 };
+
+const itemTitle = (x: ShowItem) => (x.kind === "strategy" ? planName(x.name) : x.name);
+
+/** Значок плана: маленькое кольцо с долями активов. */
+function PlanMark({ id }: { id: string }) {
+  const { config } = useSession();
+  const s = config?.strategies.find((x) => x.id === id);
+  if (!s) return <span className="plan-mark" />;
+  const R = 9, C = 2 * Math.PI * R;
+  let acc = 0;
+  return (
+    <svg className="plan-mark" viewBox="0 0 26 26" aria-hidden>
+      {Object.entries(s.weights).sort((a, b) => b[1] - a[1]).map(([a, w]) => {
+        const len = (w / 10000) * C;
+        const el = <circle key={a} cx="13" cy="13" r={R} fill="none" strokeWidth="6" stroke={config?.assets.find((x) => x.symbol === a)?.color} strokeDasharray={`${len} ${C}`} strokeDashoffset={-acc} transform="rotate(-90 13 13)" />;
+        acc += len;
+        return el;
+      })}
+    </svg>
+  );
+}
+
+function ItemMark({ x }: { x: ShowItem }) {
+  return x.kind === "strategy" ? <PlanMark id={x.id} /> : <AssetIcon symbol={x.symbol!} size="sm" />;
+}
 
 function useShowcase(amount: number, years: number) {
   const [data, setData] = useState<ShowItem[] | null>(null);
@@ -71,9 +100,18 @@ function TimeMachine() {
   useEffect(() => setSel(null), [amount, years]);
   const best = data?.[0];
   const cur = data?.find((x) => x.id === sel) || best;
-  const from = cur ? new Date(cur.from).toLocaleDateString("ru-RU", { month: "long", year: "numeric" }) : "";
-  const top = data?.slice(0, 5) || [];
-  const maxV = Math.max(1, ...top.map((x) => x.value_kop));
+  const from = cur ? new Date(cur.from).toLocaleDateString("ru-RU", { day: "numeric", month: "long", year: "numeric" }) : "";
+  const plans = data?.filter((x) => x.kind === "strategy").slice(0, 3) || [];
+  const assets = data?.filter((x) => x.kind === "asset").slice(0, 3) || [];
+  const maxV = Math.max(1, ...plans.map((x) => x.value_kop), ...assets.map((x) => x.value_kop));
+  const row = (x: ShowItem) => (
+    <button key={x.id} role="listitem" className={`tm-row ${x.id === cur?.id ? "on" : ""}`} onClick={() => setSel(x.id)}>
+      <span className="tm-name"><ItemMark x={x} /><span>{itemTitle(x)}</span></span>
+      <span className="tm-bar"><i style={{ width: (x.value_kop / maxV) * 100 + "%" }} /></span>
+      <span className="num tm-v">{roundByn(x.value_kop)}</span>
+      <span className={`num tm-p ${x.profit_pct >= 0 ? "up" : "down"}`}>{pct(x.profit_pct, { digits: 0 })}</span>
+    </button>
+  );
   return (
     <div className="sheet tm">
       <div className="tm-head">
@@ -88,20 +126,16 @@ function TimeMachine() {
       {cur ? (
         <>
           <div className="tm-win">
-            <div className="small muted">{cur.id === best?.id ? "Лучший результат" : "Результат"} — <b className="ink">{cur.name}</b></div>
+            <div className="small muted row g8">{cur.id === best?.id ? "Лучший результат" : "Результат"} — <span className="row g4 ink"><ItemMark x={cur} />{itemTitle(cur)}</span></div>
             <div className="tm-value num up">{roundByn(cur.value_kop)}</div>
             <div className="small muted">вместо {roundByn(cur.invested_kop)} вложенных · <b className={cur.profit_pct >= 0 ? "up" : "down"}>{pct(cur.profit_pct, { digits: 0 })}</b></div>
           </div>
           <GrowthChart points={cur.points} />
           <div className="tm-rank" role="list">
-            {top.map((x) => (
-              <button key={x.id} role="listitem" className={`tm-row ${x.id === cur.id ? "on" : ""}`} onClick={() => setSel(x.id)}>
-                <span className="tm-name">{x.name}</span>
-                <span className="tm-bar"><i style={{ width: (x.value_kop / maxV) * 100 + "%" }} /></span>
-                <span className="num tm-v">{roundByn(x.value_kop)}</span>
-                <span className={`num tm-p ${x.profit_pct >= 0 ? "up" : "down"}`}>{pct(x.profit_pct, { digits: 0 })}</span>
-              </button>
-            ))}
+            <div className="tm-group">Планы AutoInvest</div>
+            {plans.map(row)}
+            <div className="tm-group">Отдельные активы</div>
+            {assets.map(row)}
           </div>
           <div className="tiny faint tm-foot">Реальные цены с {from} и курс НБРБ, с учётом комиссии. Пунктир — сколько вложено. Прошлая доходность не гарантирует будущую.</div>
         </>
@@ -113,16 +147,27 @@ function TimeMachine() {
 }
 
 function LiveTicker() {
-  const { quotes, rates } = useMarket();
-  const list = ["BTC", "ETH", "PAXG", "SOL"].map((s) => quotes[s]).filter(Boolean);
+  const { quotes } = useMarket();
+  const { config: cfg } = useSession();
+  const list = (cfg?.assets || []).filter((a) => !a.pro_only && quotes[a.symbol] && !quotes[a.symbol].stale).map((a) => ({ a, q: quotes[a.symbol] }));
   if (!list.length) return null;
+  const items = list.map(({ a, q }) => (
+    <span key={a.symbol} className="ticker-item">
+      <AssetIcon symbol={a.symbol} size="sm" />
+      <span className="ticker-name">{a.name}</span>
+      <b className="num">{price(q.price_byn)}</b>
+      <Change v={q.change_24h} className="tiny" />
+    </span>
+  ));
   return (
-    <div className="ticker" aria-label="Цены сейчас">
-      <span className="ticker-live"><i />Цены сейчас</span>
-      {list.map((q) => (
-        <span key={q.symbol} className="ticker-item"><AssetIcon symbol={q.symbol} size="sm" />{SIMPLE[q.symbol]}<b className="num">{price(q.price_byn)}</b><Change v={q.change_24h} className="tiny" /></span>
-      ))}
-      {rates && <span className="ticker-item">Доллар НБРБ<b className="num">{price(rates.usd)}</b></span>}
+    <div className="ticker-wrap">
+      <div className="ticker-head"><span className="ticker-live"><i />Цены сейчас</span><span className="tiny faint">биржевые котировки в рублях по курсу НБРБ, обновляются каждые 5 секунд</span></div>
+      <div className="marquee" aria-label="Цены сейчас">
+        <div className="marquee-track" style={{ animationDuration: list.length * 6 + "s" }}>
+          <div className="marquee-set">{items}</div>
+          <div className="marquee-set" aria-hidden>{items}</div>
+        </div>
+      </div>
     </div>
   );
 }
@@ -145,10 +190,10 @@ function HowItWorks() {
       title: "Выберите сумму и стратегию", text: "Например, 20 " + RUB + " каждую пятницу.",
       art: (
         <div className="art-setup">
-          <div className="art-amount num">20 {RUB}</div>
+          <div className="row between"><span className="art-amount num">20 {RUB}</span><span className="tiny muted">План «Резерв»</span></div>
           <div className="art-days">{["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"].map((d) => <span key={d} className={d === "Пт" ? "on" : ""}>{d}</span>)}</div>
           <div className="alloc-bar"><span style={{ width: "60%", background: "#26A17B" }} /><span style={{ width: "40%", background: "#C9A227" }} /></div>
-          <div className="row g12 tiny muted"><span className="row g4"><span className="dot" style={{ background: "#26A17B" }} />Доллар 60%</span><span className="row g4"><span className="dot" style={{ background: "#C9A227" }} />Золото 40%</span></div>
+          <div className="row g12 tiny muted"><span className="row g4"><span className="dot" style={{ background: "#26A17B" }} />Tether 60%</span><span className="row g4"><span className="dot" style={{ background: "#C9A227" }} />PAX Gold 40%</span></div>
         </div>
       ),
     },
@@ -209,6 +254,7 @@ function Donut({ parts, colorOf, center }: { parts: [string, number][]; colorOf:
 
 function StrategySlide({ s, stat, cta }: { s: Strategy; stat?: ShowItem; cta: string }) {
   const { config } = useSession();
+  const nameOf = useAssetName();
   const parts = Object.entries(s.weights).sort((a, b) => b[1] - a[1]);
   const colorOf = (a: string) => config?.assets.find((x) => x.symbol === a)?.color || "#8a919e";
   return (
@@ -216,25 +262,31 @@ function StrategySlide({ s, stat, cta }: { s: Strategy; stat?: ShowItem; cta: st
       <Donut parts={parts} colorOf={colorOf} center={<><b>{parts.length}</b><span>{parts.length === 1 ? "актив" : parts.length < 5 ? "актива" : "активов"}</span></>} />
       <div className="slide-body">
         <div className="row g8 small muted"><RiskDots risk={s.risk} />{riskLabel(s.risk)} риск</div>
-        <h3>{s.name}</h3>
+        <h3>{planName(s.name)}</h3>
         <p className="slide-pitch">{PITCH[s.id] || s.description}</p>
         <div className="slide-mix">
-          {parts.map(([a, w]) => <span key={a}><AssetIcon symbol={a} size="sm" />{SIMPLE[a] || a}<b className="num">{w / 100}%</b></span>)}
+          {parts.map(([a, w]) => <span key={a}><AssetIcon symbol={a} size="sm" />{nameOf(a)}<b className="num">{w / 100}%</b></span>)}
         </div>
-        {stat && (
+        {stat && (stat.usd_cents ? (
+          <div className="slide-stat">
+            <span className="small muted">20 {RUB} каждую неделю последние 5 лет</span>
+            <span><b className="num">${groupInt(Math.round(stat.usd_cents / 100))}</b> <span className="small muted">накоплено — {roundByn(stat.value_kop)} по курсу сегодня</span></span>
+            {(stat.fx_gain_kop ?? 0) > 0 && <span className="small up">+{roundByn(stat.fx_gain_kop!)} принёс рост курса доллара</span>}
+          </div>
+        ) : (
           <div className="slide-stat">
             <span className="small muted">20 {RUB} каждую неделю последние 5 лет</span>
             <span><b className="num">{roundByn(stat.value_kop)}</b> <span className="small muted">из {roundByn(stat.invested_kop)} вложенных</span></span>
           </div>
-        )}
-        <Link to={cta + "?strategy=" + s.id} className="btn btn-primary">Начать с «{s.name}»</Link>
+        ))}
+        <Link to={cta + "?strategy=" + s.id} className="btn btn-primary">Выбрать {planName(s.name).replace("План", "план")}</Link>
       </div>
     </div>
   );
 }
 
 function CustomSlide({ cta }: { cta: string }) {
-  const rows: [string, string, number][] = [["BTC", "Биткоин", 45], ["SPY", "S&P 500", 30], ["PAXG", "Золото", 25]];
+  const rows: [string, string, number][] = [["BTC", "Bitcoin", 45], ["SPY", "S&P 500", 30], ["PAXG", "PAX Gold", 25]];
   return (
     <div className="slide">
       <div className="custom-art">
@@ -302,7 +354,7 @@ function StrategyDeck({ strategies }: { strategies: Strategy[] }) {
       <div className="deck-tabs" role="tablist" ref={tabsRef}>
         {strategies.map((s, k) => (
           <button key={s.id} role="tab" aria-selected={k === i} className={k === i ? "on" : ""} onClick={() => go(k)}>
-            <span className={`deck-risk r${s.risk}`} />{s.name}
+            <span className={`deck-risk r${s.risk}`} />{planName(s.name)}
           </button>
         ))}
         <button role="tab" aria-selected={i === n - 1} className={i === n - 1 ? "on" : ""} onClick={() => go(n - 1)}><SlidersHorizontal className="ico-sm" />Свой состав</button>
@@ -398,8 +450,8 @@ export default function Landing() {
 
       <section className="section" id="strategies">
         <div className="wrapx">
-          <h2 className="big">Выберите стратегию</h2>
-          <p className="sub">Шесть готовых наборов — от спокойного до смелого. Или соберите свой.</p>
+          <h2 className="big">Выберите план</h2>
+          <p className="sub">Шесть готовых планов — от спокойного до смелого. Или соберите свой.</p>
           <StrategyDeck strategies={strategies} />
         </div>
       </section>
@@ -415,7 +467,7 @@ export default function Landing() {
               <div className="small muted">навсегда</div>
               <ul>
                 <li><Check />До {config?.free_plan_limit ?? 3} копилок</li>
-                <li><Check />Шесть готовых стратегий</li>
+                <li><Check />Шесть готовых планов</li>
                 <li><Check />Комиссия {feeFree} с пополнения</li>
                 <li><Check />Уведомления в Telegram</li>
               </ul>

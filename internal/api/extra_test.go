@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"autoinvest/internal/engine"
 	"autoinvest/internal/store"
 )
 
@@ -99,7 +100,7 @@ func TestStatementShowsVenueAndRespectsPeriod(t *testing.T) {
 		}
 		LiveBroker bool `json:"live_broker"`
 	}
-	today := time.Now().Format("2006-01-02")
+	today := time.Now().In(engine.Minsk).Format("2006-01-02") // период сервер считает по Минску
 	if code := c.do("GET", "/api/v1/operations/statement?from="+today+"&to="+today, nil, &st); code != 200 || len(st.Operations) != 1 {
 		t.Fatalf("statement: %d %+v", code, st)
 	}

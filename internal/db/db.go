@@ -73,6 +73,38 @@ func migrate(ctx context.Context, d *sql.DB) error {
 	return nil
 }
 
+// Backup делает согласованную копию базы в файл dst через VACUUM INTO: сервис продолжает
+// работать, копия не содержит «половинок» транзакций и сразу пригодна для восстановления.
+func Backup(ctx context.Context, d *sql.DB, dst string) error {
+	dst, err := filepath.Abs(dst)
+	if err != nil {
+		return err
+	}
+	if _, err := os.Stat(dst); err == nil {
+		return fmt.Errorf("файл %s уже существует", dst)
+	}
+	if err := os.MkdirAll(filepath.Dir(dst), 0o750); err != nil {
+		return err
+	}
+	if _, err := d.ExecContext(ctx, `VACUUM INTO ?`, dst); err != nil {
+		return fmt.Errorf("vacuum into: %w", err)
+	}
+	// проверяем, что копия открывается и цела
+	chk, err := sql.Open("sqlite3", "file:"+filepath.ToSlash(dst)+"?mode=ro")
+	if err != nil {
+		return err
+	}
+	defer chk.Close()
+	var res string
+	if err := chk.QueryRowContext(ctx, `PRAGMA integrity_check`).Scan(&res); err != nil {
+		return err
+	}
+	if res != "ok" {
+		return fmt.Errorf("копия повреждена: %s", res)
+	}
+	return nil
+}
+
 // Tx выполняет fn в транзакции.
 func Tx(ctx context.Context, d *sql.DB, fn func(*sql.Tx) error) error {
 	tx, err := d.BeginTx(ctx, nil)

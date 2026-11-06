@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { Suspense, useState } from "react";
 import { Link, NavLink, Outlet, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { ArrowLeft, Gauge, IdCard, LayoutDashboard, ListOrdered, MessageSquare, Search, Users, House } from "lucide-react";
 import { api } from "../../lib/api";
@@ -32,7 +32,7 @@ export function AdminLayout() {
         </aside>
         <div className="main">
           <header className="topbar"><span className="page-title">Панель управления</span><span className="spacer" /><Link to="/app" className="btn btn-ghost btn-sm mobile-brand">В приложение</Link></header>
-          <main className="content"><Outlet /></main>
+          <main className="content"><Suspense fallback={<PageLoader />}><Outlet /></Suspense></main>
         </div>
       </div>
     </>
@@ -80,7 +80,79 @@ export function AdminOverview() {
         <section className="sheet"><div className="sheet-head"><h2>Пополнения, 30 дней</h2></div><div className="sheet-body"><div className="bars">{data!.series.map((s) => <span key={s.day} title={`${s.day}: ${byn(s.volume_kop)}`} style={{ height: (s.volume_kop / maxV) * 100 + "%" }} />)}</div></div></section>
         <section className="sheet"><div className="sheet-head"><h2>Регистрации, 30 дней</h2></div><div className="sheet-body"><div className="bars">{data!.series.map((s) => <span key={s.day} title={`${s.day}: ${s.signups}`} style={{ height: (s.signups / maxS) * 100 + "%", background: "#161a23" }} />)}</div></div></section>
       </div>
+      <PartnerMetrics />
     </div>
+  );
+}
+
+type Metrics = {
+  metrics: {
+    funnel: { registered: number; email_verified: number; with_card: number; with_plan: number; invested: number };
+    retention_30d: number; retention_base: number; avg_ticket_kop: number; active_investors: number;
+    asset_volume_30d: { asset: string; amount_kop: number }[];
+    cohorts: { month: string; registered: number; invested: number; active_30d: number }[];
+  };
+  holdings: { asset: string; qty: number; cost_kop: number; value_kop: number }[];
+  aum_kop: number; cost_kop: number;
+};
+
+// Показатели, которые спрашивают оператор-партнёр, банк или инвестор: воронка, удержание, активы под учётом.
+function PartnerMetrics() {
+  const { data } = useLoad(() => api.get<Metrics>("/admin/metrics"), []);
+  if (!data) return null;
+  const m = data.metrics;
+  const f = m.funnel;
+  const steps: [string, number][] = [["Зарегистрировались", f.registered], ["Подтвердили почту", f.email_verified], ["Привязали карту", f.with_card], ["Создали копилку", f.with_plan], ["Сделали первое пополнение", f.invested]];
+  const pctOf = (v: number, base: number) => (base ? `${Math.round((v / base) * 100)}%` : "—");
+  const totalVol = m.asset_volume_30d.reduce((a, x) => a + x.amount_kop, 0);
+  return (
+    <>
+      <div className="page-head" style={{ margin: "16px 0 0" }}><div><h2>Для партнёров и инвесторов</h2><p>Воронка, удержание и активы под учётом — по данным базы, без оценок</p></div></div>
+      <section className="sheet">
+        <div className="metric-grid">
+          <div><div className="l">Активы под учётом</div><div className="v num"><Money k={data.aum_kop} /></div><div className="tiny muted">вложено <Money k={data.cost_kop} /></div></div>
+          <div><div className="l">Активные инвесторы</div><div className="v num">{m.active_investors}</div><div className="tiny muted">пополняли за 30 дней</div></div>
+          <div><div className="l">Удержание 30 дней</div><div className="v num">{m.retention_base ? `${Math.round(m.retention_30d * 100)}%` : "—"}</div><div className="tiny muted">из {m.retention_base} инвесторов старше месяца</div></div>
+          <div><div className="l">Средний взнос</div><div className="v num"><Money k={m.avg_ticket_kop} /></div><div className="tiny muted">за 30 дней</div></div>
+        </div>
+      </section>
+      <div className="grid2">
+        <section className="sheet">
+          <div className="sheet-head"><h2>Воронка</h2></div>
+          <div className="sheet-body stack g12">
+            {steps.map(([label, v], i) => (
+              <div key={label}>
+                <div className="row between small"><span>{label}</span><span className="num">{v} <span className="muted">· {i === 0 ? "100%" : pctOf(v, f.registered)}</span></span></div>
+                <div className="bar"><span style={{ width: f.registered ? `${(v / f.registered) * 100}%` : "0%" }} /></div>
+              </div>
+            ))}
+          </div>
+        </section>
+        <section className="sheet">
+          <div className="sheet-head"><h2>Пополнения по активам, 30 дней</h2></div>
+          <div className="sheet-body stack g12">
+            {m.asset_volume_30d.length === 0 && <p className="small muted">Пополнений пока не было.</p>}
+            {m.asset_volume_30d.map((a) => (
+              <div key={a.asset}>
+                <div className="row between small"><span>{a.asset}</span><span className="num">{byn(a.amount_kop)} <span className="muted">· {pctOf(a.amount_kop, totalVol)}</span></span></div>
+                <div className="bar"><span style={{ width: totalVol ? `${(a.amount_kop / totalVol) * 100}%` : "0%" }} /></div>
+              </div>
+            ))}
+          </div>
+        </section>
+      </div>
+      <section className="sheet">
+        <div className="sheet-head"><h2>Когорты по месяцу регистрации</h2></div>
+        <div className="table-wrap">
+          <table className="table">
+            <thead><tr><th>Месяц</th><th className="r">Зарегистрировались</th><th className="r">Начали инвестировать</th><th className="r">Активны последние 30 дней</th></tr></thead>
+            <tbody>{m.cohorts.map((c) => (
+              <tr key={c.month}><td>{c.month}</td><td className="r num">{c.registered}</td><td className="r num">{c.invested} <span className="muted">· {pctOf(c.invested, c.registered)}</span></td><td className="r num">{c.active_30d} <span className="muted">· {pctOf(c.active_30d, c.registered)}</span></td></tr>
+            ))}</tbody>
+          </table>
+        </div>
+      </section>
+    </>
   );
 }
 

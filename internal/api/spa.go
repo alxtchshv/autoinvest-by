@@ -2,10 +2,17 @@ package api
 
 import (
 	"io/fs"
+	"mime"
 	"net/http"
+	"net/url"
 	"path"
 	"strings"
 )
+
+func init() {
+	// манифест PWA: без правильного типа часть браузеров не предлагает «Установить приложение»
+	mime.AddExtensionType(".webmanifest", "application/manifest+json")
+}
 
 // spa раздаёт собранный фронтенд; неизвестные пути отдают index.html (клиентский роутинг).
 func (s *Server) spa() http.Handler {
@@ -14,7 +21,7 @@ func (s *Server) spa() http.Handler {
 		p := strings.TrimPrefix(path.Clean(r.URL.Path), "/")
 		if strings.HasPrefix(p, "r/") {
 			// реферальная ссылка autoinvest.by/r/CODE → регистрация с кодом
-			http.Redirect(w, r, "/register?ref="+strings.TrimPrefix(p, "r/"), http.StatusFound)
+			http.Redirect(w, r, "/register?ref="+url.QueryEscape(strings.TrimPrefix(p, "r/")), http.StatusFound)
 			return
 		}
 		if p != "" {

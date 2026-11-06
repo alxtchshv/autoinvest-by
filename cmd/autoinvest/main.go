@@ -3,6 +3,7 @@
 //	autoinvest                         запустить сервер
 //	autoinvest admin <email> <пароль>  создать администратора (или выдать права существующему)
 //	autoinvest demo                    создать демо-пользователя (только тестовый режим платежей)
+//	autoinvest backup <файл>           согласованная копия базы без остановки сервиса
 package main
 
 import (
@@ -69,6 +70,17 @@ func main() {
 				os.Exit(1)
 			}
 			fmt.Println("Администратор готов:", os.Args[2])
+			return
+		case "backup":
+			if len(os.Args) != 3 {
+				fmt.Println("использование: autoinvest backup <файл>")
+				os.Exit(2)
+			}
+			if err := db.Backup(context.Background(), d, os.Args[2]); err != nil {
+				fmt.Println("Ошибка:", err)
+				os.Exit(1)
+			}
+			fmt.Println("Копия базы:", os.Args[2])
 			return
 		case "demo":
 			// обрабатывается ниже, когда поднят рынок

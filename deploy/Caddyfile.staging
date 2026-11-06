@@ -1,0 +1,19 @@
+# Тестовый контур: закрыт паролем и не индексируется поисковиками.
+# 1) Замените домен.
+# 2) Хеш пароля: docker run --rm caddy:2-alpine caddy hash-password --plaintext 'ваш-пароль'
+#    и вставьте его вместо REPLACE_WITH_HASH (логин — tester).
+# 3) cp deploy/Caddyfile.staging deploy/Caddyfile
+test.autoinvest.by {
+	encode zstd gzip
+	header X-Robots-Tag "noindex, nofollow"
+
+	# вебхуки bePaid должны доходить без пароля — у них своя проверка подписи
+	@protected not path /api/v1/webhooks/*
+	basic_auth @protected {
+		tester REPLACE_WITH_HASH
+	}
+
+	reverse_proxy app:8080 {
+		flush_interval -1
+	}
+}

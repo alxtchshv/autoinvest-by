@@ -143,3 +143,123 @@ type multiScanner struct {
 }
 
 func (m multiScanner) Scan(dst ...any) error { return m.r.Scan(append(dst, m.extra...)...) }
+
+// PartnerMetrics — показатели, которые спрашивают партнёры и инвесторы: воронка, удержание,
+// средний взнос, объём по активам и когорты регистраций.
+type PartnerMetrics struct {
+	Funnel struct {
+		Registered    int `json:"registered"`
+		EmailVerified int `json:"email_verified"`
+		WithCard      int `json:"with_card"`
+		WithPlan      int `json:"with_plan"`
+		Invested      int `json:"invested"`
+	} `json:"funnel"`
+	// Retention30d — доля инвесторов, сделавших первую покупку больше 30 дней назад
+	// и пополнявших копилки за последние 30 дней.
+	Retention30d    float64       `json:"retention_30d"`
+	RetentionBase   int           `json:"retention_base"`
+	AvgTicketKop    int64         `json:"avg_ticket_kop"`   // средняя сумма пополнения за 30 дней
+	ActiveInvestors int           `json:"active_investors"` // пополняли за 30 дней
+	AssetVolume30d  []AssetVolume `json:"asset_volume_30d"`
+	Holdings        []AssetQty    `json:"holdings"` // суммарные остатки по активам (для оценки AUM)
+	Cohorts         []Cohort      `json:"cohorts"`
+}
+
+type AssetVolume struct {
+	Asset     string `json:"asset"`
+	AmountKop int64  `json:"amount_kop"`
+}
+
+type AssetQty struct {
+	Asset   string `json:"asset"`
+	Qty     int64  `json:"qty"` // 1e-8
+	CostKop int64  `json:"cost_kop"`
+}
+
+type Cohort struct {
+	Month      string `json:"month"`
+	Registered int    `json:"registered"`
+	Invested   int    `json:"invested"`
+	Active30d  int    `json:"active_30d"`
+}
+
+func (s *Store) PartnerMetrics(ctx context.Context) (PartnerMetrics, error) {
+	var m PartnerMetrics
+	now := Now()
+	month := now - 30*86400
+	q := func(dst any, sql string, args ...any) error { return s.DB.QueryRowContext(ctx, sql, args...).Scan(dst) }
+	base := `FROM users u WHERE u.status!='deleted' AND u.role='user'`
+	if err := q(&m.Funnel.Registered, `SELECT COUNT(*) `+base); err != nil {
+		return m, err
+	}
+	q(&m.Funnel.EmailVerified, `SELECT COUNT(*) `+base+` AND u.email_verified_at IS NOT NULL`)
+	q(&m.Funnel.WithCard, `SELECT COUNT(*) `+base+` AND EXISTS(SELECT 1 FROM cards c WHERE c.user_id=u.id)`)
+	q(&m.Funnel.WithPlan, `SELECT COUNT(*) `+base+` AND EXISTS(SELECT 1 FROM plans p WHERE p.user_id=u.id)`)
+	q(&m.Funnel.Invested, `SELECT COUNT(*) `+base+` AND EXISTS(SELECT 1 FROM orders o WHERE o.user_id=u.id AND o.side='buy' AND o.status='filled')`)
+	q(&m.ActiveInvestors, `SELECT COUNT(DISTINCT user_id) FROM orders WHERE side='buy' AND status='filled' AND created_at>?`, month)
+	q(&m.AvgTicketKop, `SELECT COALESCE(AVG(amount_kop),0) FROM orders WHERE side='buy' AND status='filled' AND created_at>?`, month)
+
+	var retained int
+	q(&m.RetentionBase, `SELECT COUNT(*) FROM (SELECT user_id FROM orders WHERE side='buy' AND status='filled' GROUP BY user_id HAVING MIN(created_at)<?)`, month)
+	q(&retained, `SELECT COUNT(*) FROM (SELECT user_id FROM orders WHERE side='buy' AND status='filled' GROUP BY user_id
+		HAVING MIN(created_at)<? AND MAX(created_at)>?)`, month, month)
+	if m.RetentionBase > 0 {
+		m.Retention30d = float64(retained) / float64(m.RetentionBase)
+	}
+
+	rows, err := s.DB.QueryContext(ctx, `SELECT f.asset, SUM(f.amount_kop) FROM fills f JOIN orders o ON o.id=f.order_id
+		WHERE o.side='buy' AND o.status='filled' AND o.created_at>? GROUP BY f.asset ORDER BY 2 DESC`, month)
+	if err != nil {
+		return m, err
+	}
+	for rows.Next() {
+		var a AssetVolume
+		if err := rows.Scan(&a.Asset, &a.AmountKop); err != nil {
+			rows.Close()
+			return m, err
+		}
+		m.AssetVolume30d = append(m.AssetVolume30d, a)
+	}
+	rows.Close()
+
+	rows, err = s.DB.QueryContext(ctx, `SELECT x.asset, SUM(x.qty), SUM(x.cost_kop) FROM positions x JOIN plans p ON p.id=x.plan_id
+		WHERE x.qty>0 GROUP BY x.asset ORDER BY 3 DESC`)
+	if err != nil {
+		return m, err
+	}
+	for rows.Next() {
+		var a AssetQty
+		if err := rows.Scan(&a.Asset, &a.Qty, &a.CostKop); err != nil {
+			rows.Close()
+			return m, err
+		}
+		m.Holdings = append(m.Holdings, a)
+	}
+	rows.Close()
+
+	rows, err = s.DB.QueryContext(ctx, `SELECT strftime('%Y-%m', u.created_at, 'unixepoch') AS mon, COUNT(*),
+		SUM(EXISTS(SELECT 1 FROM orders o WHERE o.user_id=u.id AND o.side='buy' AND o.status='filled')),
+		SUM(EXISTS(SELECT 1 FROM orders o WHERE o.user_id=u.id AND o.side='buy' AND o.status='filled' AND o.created_at>?))
+		`+base+` AND u.created_at>? GROUP BY mon ORDER BY mon DESC`, month, now-186*86400)
+	if err != nil {
+		return m, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var c Cohort
+		if err := rows.Scan(&c.Month, &c.Registered, &c.Invested, &c.Active30d); err != nil {
+			return m, err
+		}
+		m.Cohorts = append(m.Cohorts, c)
+	}
+	if m.AssetVolume30d == nil {
+		m.AssetVolume30d = []AssetVolume{}
+	}
+	if m.Holdings == nil {
+		m.Holdings = []AssetQty{}
+	}
+	if m.Cohorts == nil {
+		m.Cohorts = []Cohort{}
+	}
+	return m, rows.Err()
+}

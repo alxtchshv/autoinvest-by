@@ -168,6 +168,7 @@ func (s *Server) routes(m *http.ServeMux) {
 
 	// админка
 	staff("GET /api/v1/admin/overview", s.adminOverview)
+	staff("GET /api/v1/admin/metrics", s.adminMetrics)
 	staff("GET /api/v1/admin/users", s.adminUsers)
 	staff("GET /api/v1/admin/users/{id}", s.adminUser)
 	admin("POST /api/v1/admin/users/{id}/status", s.adminUserStatus)
@@ -333,6 +334,11 @@ func (s *Server) requireStaff(h http.HandlerFunc, adminOnly bool) http.HandlerFu
 		}
 		if !u.IsStaff() || (adminOnly && u.Role != "admin") {
 			writeErr(w, http.StatusForbidden, "Недостаточно прав")
+			return
+		}
+		// В боевом режиме доступ к данным клиентов — только с двухфакторной защитой.
+		if s.Cfg.Env == "production" && !u.TOTPEnabled {
+			writeJSON(w, http.StatusForbidden, apiErr{Error: "Для доступа к админке включите двухфакторную защиту: Профиль → Безопасность", Code: "staff_2fa_required"})
 			return
 		}
 		h(w, r)

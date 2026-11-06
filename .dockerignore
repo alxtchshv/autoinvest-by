@@ -1,0 +1,16 @@
+.git
+_archive
+bin
+data
+backups
+web/app/node_modules
+web/dist
+.env
+.env.*
+!.env.example
+*.db
+*.db-*
+*.log
+.DS_Store
+.idea
+.vscode

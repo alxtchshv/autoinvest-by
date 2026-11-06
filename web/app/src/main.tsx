@@ -1,4 +1,4 @@
-import { StrictMode } from "react";
+import { lazy, StrictMode, Suspense } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import "@fontsource-variable/onest";
@@ -7,29 +7,40 @@ import "./styles/components.css";
 import "./styles/layout.css";
 import "./styles/pages.css";
 import { SessionProvider } from "./lib/session";
-import { HideProvider, ToastProvider } from "./components/ui";
+import { HideProvider, PageLoader, ToastProvider } from "./components/ui";
 import { AppShell, PublicLayout, RequireAuth } from "./components/layout";
 import Landing from "./pages/public/Landing";
 import { Forgot, Login, Register, Reset, VerifyEmail } from "./pages/public/Auth";
-import Legal from "./pages/public/Legal";
 import NotFound from "./pages/public/NotFound";
-import Home from "./pages/app/Home";
-import Plans from "./pages/app/Plans";
-import PlanNew from "./pages/app/PlanNew";
-import PlanDetail from "./pages/app/PlanDetail";
-import Market from "./pages/app/Market";
-import AssetPage from "./pages/app/Asset";
-import Calculator from "./pages/app/Calculator";
-import History from "./pages/app/History";
-import Receipt from "./pages/app/Receipt";
-import Statement from "./pages/app/Statement";
-import Onboarding from "./pages/app/Onboarding";
-import Cards from "./pages/app/Cards";
-import SandboxPay from "./pages/app/SandboxPay";
-import Notifications from "./pages/app/Notifications";
-import { Support, TicketPage } from "./pages/app/Support";
-import Profile from "./pages/app/Profile";
-import { AdminLayout, AdminOverview, AdminUsers, AdminUser, AdminKYC, AdminTickets, AdminTicket, AdminOrders, AdminSystem } from "./pages/admin/Admin";
+
+// Кабинет, админка и тяжёлые страницы (графики) грузятся отдельными частями: первый экран открывается быстрее.
+const Legal = lazy(() => import("./pages/public/Legal"));
+const Home = lazy(() => import("./pages/app/Home"));
+const Plans = lazy(() => import("./pages/app/Plans"));
+const PlanNew = lazy(() => import("./pages/app/PlanNew"));
+const PlanDetail = lazy(() => import("./pages/app/PlanDetail"));
+const Market = lazy(() => import("./pages/app/Market"));
+const AssetPage = lazy(() => import("./pages/app/Asset"));
+const Calculator = lazy(() => import("./pages/app/Calculator"));
+const History = lazy(() => import("./pages/app/History"));
+const Receipt = lazy(() => import("./pages/app/Receipt"));
+const Statement = lazy(() => import("./pages/app/Statement"));
+const Onboarding = lazy(() => import("./pages/app/Onboarding"));
+const Cards = lazy(() => import("./pages/app/Cards"));
+const SandboxPay = lazy(() => import("./pages/app/SandboxPay"));
+const Notifications = lazy(() => import("./pages/app/Notifications"));
+const Profile = lazy(() => import("./pages/app/Profile"));
+const Support = lazy(() => import("./pages/app/Support").then((m) => ({ default: m.Support })));
+const TicketPage = lazy(() => import("./pages/app/Support").then((m) => ({ default: m.TicketPage })));
+const AdminLayout = lazy(() => import("./pages/admin/Admin").then((m) => ({ default: m.AdminLayout })));
+const AdminOverview = lazy(() => import("./pages/admin/Admin").then((m) => ({ default: m.AdminOverview })));
+const AdminUsers = lazy(() => import("./pages/admin/Admin").then((m) => ({ default: m.AdminUsers })));
+const AdminUser = lazy(() => import("./pages/admin/Admin").then((m) => ({ default: m.AdminUser })));
+const AdminKYC = lazy(() => import("./pages/admin/Admin").then((m) => ({ default: m.AdminKYC })));
+const AdminTickets = lazy(() => import("./pages/admin/Admin").then((m) => ({ default: m.AdminTickets })));
+const AdminTicket = lazy(() => import("./pages/admin/Admin").then((m) => ({ default: m.AdminTicket })));
+const AdminOrders = lazy(() => import("./pages/admin/Admin").then((m) => ({ default: m.AdminOrders })));
+const AdminSystem = lazy(() => import("./pages/admin/Admin").then((m) => ({ default: m.AdminSystem })));
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
@@ -37,6 +48,7 @@ createRoot(document.getElementById("root")!).render(
       <SessionProvider>
         <HideProvider>
           <ToastProvider>
+            <Suspense fallback={<PageLoader />}>
             <Routes>
               <Route element={<PublicLayout />}>
                 <Route index element={<Landing />} />
@@ -82,6 +94,7 @@ createRoot(document.getElementById("root")!).render(
                 <Route path="system" element={<AdminSystem />} />
               </Route>
             </Routes>
+            </Suspense>
           </ToastProvider>
         </HideProvider>
       </SessionProvider>

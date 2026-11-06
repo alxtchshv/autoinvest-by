@@ -10,6 +10,9 @@ services:
     volumes:
       - data:/var/lib/autoinvest
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options: { max-size: "20m", max-file: "5" }
   caddy:
     image: caddy:2-alpine
     ports: ["80:80", "443:443"]
@@ -18,6 +21,9 @@ services:
       - caddy_data:/data
     depends_on: [app]
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
 volumes:
   data:
   caddy_data:

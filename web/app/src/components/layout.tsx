@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { Suspense, useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, NavLink, Navigate, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { Bell, ChartCandlestick, CreditCard, Eye, EyeOff, History, House, LifeBuoy, PiggyBank, Calculator, Shield, LogOut, User } from "lucide-react";
 import { api } from "../lib/api";
@@ -6,7 +6,7 @@ import { ago, initials } from "../lib/format";
 import { useLoad } from "../lib/hooks";
 import { MarketProvider, useSession, useUserEvent } from "../lib/session";
 import type { Notification } from "../lib/types";
-import { Button, Logo, useHide, useToast } from "./ui";
+import { Button, Logo, PageLoader, useHide, useToast } from "./ui";
 
 export function ModeBanner() {
   const { config } = useSession();
@@ -75,7 +75,7 @@ export function AppShell() {
         <div className="main">
           <TopBar />
           <main className="content" id="main">
-            <Outlet />
+            <Suspense fallback={<PageLoader />}><Outlet /></Suspense>
           </main>
         </div>
         <nav className="tabbar" aria-label="Разделы">
@@ -188,7 +188,7 @@ export function PublicLayout() {
           )}
         </div>
       </header>
-      <Outlet />
+      <Suspense fallback={<PageLoader />}><Outlet /></Suspense>
       <SiteFooter />
     </MarketProvider>
   );

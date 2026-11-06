@@ -3,6 +3,7 @@ package api
 import (
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -10,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"autoinvest/internal/money"
 	"autoinvest/internal/notify"
 	"autoinvest/internal/store"
 )
@@ -22,6 +24,32 @@ func (s *Server) adminOverview(w http.ResponseWriter, r *http.Request) {
 	}
 	series, _ := s.St.DailySeries(r.Context(), 30)
 	writeJSON(w, 200, map[string]any{"overview": o, "series": series})
+}
+
+// adminMetrics — показатели для партнёров и инвесторов. Стоимость активов (AUM) считается
+// по текущим ценам; если котировки нет, актив учитывается по себестоимости.
+func (s *Server) adminMetrics(w http.ResponseWriter, r *http.Request) {
+	m, err := s.St.PartnerMetrics(r.Context())
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	var aum, cost int64
+	type holding struct {
+		store.AssetQty
+		ValueKop int64 `json:"value_kop"`
+	}
+	holdings := make([]holding, 0, len(m.Holdings))
+	for _, h := range m.Holdings {
+		v := h.CostKop
+		if q, err := s.Hub.Quote(h.Asset); err == nil && q.PriceBYN > 0 {
+			v = int64(math.Round(money.QtyToFloat(h.Qty) * q.PriceBYN * 100))
+		}
+		aum += v
+		cost += h.CostKop
+		holdings = append(holdings, holding{h, v})
+	}
+	writeJSON(w, 200, map[string]any{"metrics": m, "holdings": holdings, "aum_kop": aum, "cost_kop": cost})
 }
 
 func (s *Server) adminUsers(w http.ResponseWriter, r *http.Request) {

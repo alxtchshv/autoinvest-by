@@ -167,3 +167,41 @@ func TestOnboardingSavesProfile(t *testing.T) {
 		t.Fatalf("partial answers must be rejected: %d", code)
 	}
 }
+
+func TestPartnerMetricsFunnel(t *testing.T) {
+	srv, s := newServer(t)
+	a := newClient(t, srv.URL)
+	a.register("f1@test.by")
+	a.bindCard()
+	a.plan("Подушка", true)
+	b := newClient(t, srv.URL)
+	b.register("f2@test.by")
+
+	m, err := s.St.PartnerMetrics(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := m.Funnel
+	if f.Registered != 2 || f.WithCard != 1 || f.WithPlan != 1 || f.Invested != 1 {
+		t.Fatalf("funnel %+v", f)
+	}
+	if len(m.AssetVolume30d) == 0 || len(m.Holdings) == 0 || len(m.Cohorts) != 1 || m.Cohorts[0].Invested != 1 {
+		t.Fatalf("metrics %+v", m)
+	}
+}
+
+func TestStaffNeeds2FAInProduction(t *testing.T) {
+	srv, s := newServer(t)
+	c := newClient(t, srv.URL)
+	c.register("adm@test.by")
+	u, _ := s.St.UserByEmail(t.Context(), "adm@test.by")
+	s.St.UpdateUserFields(t.Context(), u.ID, map[string]any{"role": "admin"})
+	if code := c.do("GET", "/api/v1/admin/metrics", nil, nil); code != 200 {
+		t.Fatalf("development: %d", code)
+	}
+	s.Cfg.Env = "production"
+	var e apiErr
+	if code := c.do("GET", "/api/v1/admin/metrics", nil, &e); code != 403 || e.Code != "staff_2fa_required" {
+		t.Fatalf("production without 2FA: %d %+v", code, e)
+	}
+}

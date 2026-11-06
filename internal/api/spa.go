@@ -12,6 +12,7 @@ import (
 func init() {
 	// манифест PWA: без правильного типа часть браузеров не предлагает «Установить приложение»
 	mime.AddExtensionType(".webmanifest", "application/manifest+json")
+	mime.AddExtensionType(".woff2", "font/woff2")
 }
 
 // spa раздаёт собранный фронтенд; неизвестные пути отдают index.html (клиентский роутинг).

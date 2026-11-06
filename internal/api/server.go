@@ -50,6 +50,13 @@ type Server struct {
 	limiter *limiter
 	statsMu sync.Mutex
 	stats   map[string]statsEntry
+	showMu  sync.Mutex
+	show    map[string]showcaseEntry
+}
+
+type showcaseEntry struct {
+	at    time.Time
+	items []engine.ShowcaseItem
 }
 
 type statsEntry struct {
@@ -157,6 +164,7 @@ func (s *Server) routes(m *http.ServeMux) {
 	pub("GET /api/v1/market/candles", s.marketCandles)
 	pub("GET /api/v1/stream", s.stream)
 	pub("POST /api/v1/calculator/backtest", s.backtest)
+	pub("GET /api/v1/calculator/showcase", s.showcase)
 
 	// уведомления и поддержка
 	user("GET /api/v1/notifications", s.listNotifications)

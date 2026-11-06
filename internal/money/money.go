@@ -12,9 +12,10 @@ import (
 // QtyScale — 1 единица актива = 1e8 «сатоши».
 const QtyScale = 100_000_000
 
-// FormatBYN: 123456 → "1 234,56 BYN".
+// FormatBYN: 123456 → "1 234,56 руб.". Знак рубля (U+20C5) пока не отображается в почте и Telegram,
+// поэтому в серверных текстах пишем «руб.»; на сайте суммы форматирует фронтенд со знаком.
 func FormatBYN(kop int64) string {
-	return FormatKop(kop) + " BYN"
+	return FormatKop(kop) + " руб."
 }
 
 // FormatKop: 123456 → "1 234,56".

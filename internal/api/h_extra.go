@@ -10,7 +10,6 @@ import (
 	"autoinvest/internal/config"
 	"autoinvest/internal/engine"
 	"autoinvest/internal/market"
-	"autoinvest/internal/money"
 	"autoinvest/internal/store"
 )
 
@@ -282,7 +281,7 @@ func (s *Server) statement(w http.ResponseWriter, r *http.Request) {
 		"holder": map[string]string{"name": u.Name, "email": u.Email},
 		"from":   from, "to": to, "generated_at": store.Now(),
 		"operations": rows, "total": total, "truncated": total > len(rows),
-		"totals":      map[string]string{"deposited": money.FormatBYN(in), "withdrawn": money.FormatBYN(out), "fees": money.FormatBYN(fees)},
+		"totals":      map[string]int64{"deposited_kop": in, "withdrawn_kop": out, "fees_kop": fees},
 		"live_broker": s.Cfg.Broker == config.BrokerWhitebird,
 		"test_money":  !s.Cfg.LiveMoney(),
 	})

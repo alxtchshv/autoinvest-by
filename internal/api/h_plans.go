@@ -152,7 +152,7 @@ func (s *Server) applyPlanInput(r *http.Request, u *store.User, p *store.Plan, i
 		if *in.GoalKop <= 0 {
 			p.GoalKop = nil
 		} else if *in.GoalKop < 1000 || *in.GoalKop > 100_000_000 {
-			return "goal_kop", "Цель от 10 до 1 000 000 BYN"
+			return "goal_kop", "Цель от 10 до 1 000 000 руб."
 		} else {
 			p.GoalKop = in.GoalKop
 		}
@@ -758,13 +758,13 @@ func (s *Server) exportOperations(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte("\xEF\xBB\xBF")) // BOM, чтобы Excel открыл кириллицу
 	cw := csv.NewWriter(w)
 	cw.Comma = ';'
-	cw.Write([]string{"№", "Дата", "Копилка", "Операция", "Статус", "Сумма, BYN", "Комиссия, BYN", "Активы", "Курс USD НБРБ", "Карта", "Исполнение"})
+	cw.Write([]string{"№", "Дата", "Копилка", "Операция", "Статус", "Сумма, руб.", "Комиссия, руб.", "Активы", "Курс USD НБРБ", "Карта", "Исполнение"})
 	side := map[string]string{"buy": "Пополнение", "sell": "Вывод"}
 	status := map[string]string{"filled": "Исполнено", "failed": "Отклонено", "pending": "В обработке", "payout_pending": "Ожидает выплаты", "manual": "На проверке"}
 	for _, o := range list {
 		var parts []string
 		for _, f := range o.Fills {
-			parts = append(parts, fmt.Sprintf("%s %.8f по %.2f BYN", f.Asset, money.QtyToFloat(f.Qty), f.PriceBYN))
+			parts = append(parts, fmt.Sprintf("%s %.8f по %.2f руб.", f.Asset, money.QtyToFloat(f.Qty), f.PriceBYN))
 		}
 		cw.Write([]string{strconv.FormatInt(o.ID, 10), time.Unix(o.CreatedAt, 0).In(engine.Minsk).Format("02.01.2006 15:04"), csvSafe(o.PlanName), side[o.Side], status[o.Status],
 			strings.ReplaceAll(money.FormatKop(o.AmountKop), " ", ""), strings.ReplaceAll(money.FormatKop(o.FeeKop), " ", ""), strings.Join(parts, ", "),

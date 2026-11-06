@@ -1,6 +1,6 @@
 import { Suspense, useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, NavLink, Navigate, Outlet, useLocation, useNavigate } from "react-router-dom";
-import { Bell, ChartCandlestick, CreditCard, Eye, EyeOff, History, House, LifeBuoy, PiggyBank, Calculator, Shield, LogOut, User } from "lucide-react";
+import { Menu, X, Bell, ChartCandlestick, CreditCard, Eye, EyeOff, History, House, LifeBuoy, PiggyBank, Calculator, Shield, LogOut, User } from "lucide-react";
 import { api } from "../lib/api";
 import { ago, initials } from "../lib/format";
 import { useLoad } from "../lib/hooks";
@@ -156,36 +156,62 @@ function NotificationsBell() {
   );
 }
 
+/** Ссылка на раздел главной: на главной плавно прокручивает, с других страниц — переходит и докручивает. */
+function SectionLink({ id, children, onClick }: { id: string; children: ReactNode; onClick?: () => void }) {
+  const nav = useNavigate();
+  const loc = useLocation();
+  return (
+    <a href={"/#" + id} onClick={(e) => {
+      e.preventDefault();
+      onClick?.();
+      if (loc.pathname === "/") {
+        document.getElementById(id)?.scrollIntoView({ behavior: "smooth" });
+        history.replaceState(null, "", "/#" + id);
+      } else nav("/#" + id);
+    }}>{children}</a>
+  );
+}
+
+const SITE_LINKS: [string, string][] = [["how", "Как это работает"], ["strategies", "Стратегии"], ["calc", "Калькулятор"], ["pricing", "Тарифы"], ["faq", "Вопросы"]];
+
 export function PublicLayout() {
   const { me } = useSession();
+  const loc = useLocation();
   const [scrolled, setScrolled] = useState(false);
+  const [menu, setMenu] = useState(false);
   useEffect(() => {
     const h = () => setScrolled(window.scrollY > 8);
+    h();
     window.addEventListener("scroll", h, { passive: true });
     return () => window.removeEventListener("scroll", h);
   }, []);
+  useEffect(() => setMenu(false), [loc.pathname]);
+  const links = (close?: () => void) => SITE_LINKS.map(([id, label]) => id === "calc"
+    ? <Link key={id} to="/calculator" onClick={close}>{label}</Link>
+    : <SectionLink key={id} id={id} onClick={close}>{label}</SectionLink>);
   return (
     <MarketProvider userId={null}>
       <ModeBanner />
-      <header className={`site-head ${scrolled ? "scrolled" : ""}`}>
+      <header className={`site-head ${scrolled || menu ? "scrolled" : ""}`}>
         <div className="in">
           <Link to="/" className="brand"><Logo />AutoInvest</Link>
-          <nav aria-label="Сайт">
-            <a href="/#how">Как это работает</a>
-            <a href="/#strategies">Стратегии</a>
-            <Link to="/calculator">Калькулятор</Link>
-            <a href="/#pricing">Тарифы</a>
-            <a href="/#faq">Вопросы</a>
-          </nav>
+          <nav aria-label="Сайт">{links()}</nav>
           <span style={{ flex: 1 }} />
           {me?.user ? (
             <Link to="/app" className="btn btn-primary btn-sm">Личный кабинет</Link>
           ) : (
             <div className="row g8">
               <Link to="/login" className="btn btn-ghost btn-sm">Войти</Link>
-              <Link to="/register" className="btn btn-primary btn-sm">Открыть копилку</Link>
+              <Link to="/register" className="btn btn-primary btn-sm hide-sm">Открыть копилку</Link>
             </div>
           )}
+          <button className="burger" aria-label={menu ? "Закрыть меню" : "Открыть меню"} aria-expanded={menu} onClick={() => setMenu(!menu)}>{menu ? <X /> : <Menu />}</button>
+        </div>
+        <div className={`mnav ${menu ? "open" : ""}`} inert={!menu}>
+          <div>
+            {links(() => setMenu(false))}
+            {!me?.user && <Link to="/register" onClick={() => setMenu(false)}>Открыть копилку</Link>}
+          </div>
         </div>
       </header>
       <Suspense fallback={<PageLoader />}><Outlet /></Suspense>
@@ -206,10 +232,10 @@ function SiteFooter() {
           </div>
           <div>
             <h4>Сервис</h4>
-            <a href="/#how">Как это работает</a>
-            <a href="/#strategies">Стратегии</a>
+            <SectionLink id="how">Как это работает</SectionLink>
+            <SectionLink id="strategies">Стратегии</SectionLink>
             <Link to="/calculator">Калькулятор</Link>
-            <a href="/#pricing">Тарифы</a>
+            <SectionLink id="pricing">Тарифы</SectionLink>
           </div>
           <div>
             <h4>Документы</h4>
@@ -220,13 +246,13 @@ function SiteFooter() {
           </div>
           <div>
             <h4>Помощь</h4>
-            <a href="/#faq">Частые вопросы</a>
+            <SectionLink id="faq">Частые вопросы</SectionLink>
             <Link to="/app/support">Написать в поддержку</Link>
           </div>
         </div>
-        <p className="legal">
+        <p className="legal"><span>
           AutoInvest — технологический сервис автоматизации регулярных покупок. Сделки с цифровыми знаками (токенами) проводит оператор криптоплатформы — резидент Парка высоких технологий, платежи по картам — платёжный агрегатор bePaid. AutoInvest не является банком, не принимает вклады и не гарантирует доход. Стоимость цифровых активов может снижаться, в том числе значительно. Прошлая доходность не означает доходность в будущем.
-        </p>
+        </span></p>
       </div>
     </footer>
   );

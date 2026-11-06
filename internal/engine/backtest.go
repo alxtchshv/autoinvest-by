@@ -44,7 +44,7 @@ type BacktestResult struct {
 
 func (e *Engine) Backtest(ctx context.Context, r BacktestRequest) (*BacktestResult, error) {
 	if r.AmountKop < 100 || r.AmountKop > 10_000_000 {
-		return nil, errors.New("Сумма пополнения от 1 до 100 000 BYN")
+		return nil, errors.New("Сумма пополнения от 1 до 100 000 руб.")
 	}
 	var sum int64
 	for s, w := range r.Weights {
@@ -173,4 +173,81 @@ func (e *Engine) Backtest(ctx context.Context, r BacktestRequest) (*BacktestResu
 		}
 	}
 	return res, nil
+}
+
+// ShowcaseItem — одна строка «машины времени» на главной: стратегия или отдельный актив.
+type ShowcaseItem struct {
+	ID          string          `json:"id"`
+	Kind        string          `json:"kind"` // strategy | asset
+	Name        string          `json:"name"`
+	Symbol      string          `json:"symbol,omitempty"`
+	Color       string          `json:"color,omitempty"`
+	Risk        int             `json:"risk"`
+	InvestedKop int64           `json:"invested_kop"`
+	ValueKop    int64           `json:"value_kop"`
+	ProfitPct   float64         `json:"profit_pct"`
+	MaxDrawdown float64         `json:"max_drawdown"`
+	From        string          `json:"from"`
+	Points      []ShowcasePoint `json:"points"`
+}
+
+type ShowcasePoint struct {
+	T        int64 `json:"t"`
+	Invested int64 `json:"i"`
+	Value    int64 `json:"v"`
+}
+
+// showcaseNames — простые названия активов для витрины: человек, который видит сайт впервые, не обязан знать тикеры.
+var showcaseNames = map[string]string{"PAXG": "Золото", "BTC": "Биткоин", "ETH": "Эфир", "SOL": "Solana", "TON": "Toncoin"}
+
+// Showcase считает «что было бы» по всем готовым стратегиям и отдельным активам тарифа Старт на одинаковом
+// отрезке и сортирует по доходности. Варианты, у которых истории не хватает на весь срок (молодые активы),
+// не показываем: сравнение должно быть честным — одинаковый период и одинаковые вложения.
+func (e *Engine) Showcase(ctx context.Context, amountKop int64, years float64) ([]ShowcaseItem, error) {
+	type cand struct {
+		item    ShowcaseItem
+		weights map[string]int64
+	}
+	var cands []cand
+	for _, s := range market.Strategies {
+		cands = append(cands, cand{ShowcaseItem{ID: s.ID, Kind: "strategy", Name: s.Name, Risk: s.Risk}, s.Weights})
+	}
+	for _, a := range market.Catalog {
+		name, ok := showcaseNames[a.Symbol]
+		if !ok || a.ProOnly {
+			continue
+		}
+		cands = append(cands, cand{ShowcaseItem{ID: a.Symbol, Kind: "asset", Name: name, Symbol: a.Symbol, Color: a.Color, Risk: a.Risk},
+			map[string]int64{a.Symbol: 10000}})
+	}
+	want := time.Now().UTC().AddDate(0, -int(math.Round(years*12)), 0)
+	var out []ShowcaseItem
+	var firstErr error
+	for _, c := range cands {
+		r, err := e.Backtest(ctx, BacktestRequest{Weights: c.weights, AmountKop: amountKop, Frequency: "weekly", Years: years, DepositRate: 9})
+		if err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		from, _ := time.Parse("2006-01-02", r.From)
+		if from.Sub(want) > 120*24*time.Hour || r.ValueKop <= 0 || r.InvestedKop <= 0 {
+			continue
+		}
+		it := c.item
+		it.InvestedKop, it.ValueKop, it.ProfitPct, it.MaxDrawdown, it.From = r.InvestedKop, r.ValueKop, r.ProfitPct, r.MaxDrawdown, r.From
+		for _, p := range r.Points {
+			it.Points = append(it.Points, ShowcasePoint{T: p.T, Invested: p.Invested, Value: p.Value})
+		}
+		out = append(out, it)
+	}
+	if len(out) == 0 {
+		if firstErr == nil {
+			firstErr = ErrMarket
+		}
+		return nil, firstErr
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].ProfitPct > out[j].ProfitPct })
+	return out, nil
 }

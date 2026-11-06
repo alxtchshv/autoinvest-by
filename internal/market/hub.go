@@ -226,6 +226,9 @@ func (h *Hub) loadHistory(ctx context.Context) {
 	from := time.Date(2017, 1, 1, 0, 0, 0, 0, time.UTC)
 	hist, err := h.rateSrc.USDHistory(c, from, to)
 	if err != nil || len(hist) == 0 {
+		if ctx.Err() != nil {
+			return // сервер останавливается — это не ошибка источника
+		}
 		h.log.Warn("история курса USD НБРБ недоступна", "err", err)
 		return
 	}

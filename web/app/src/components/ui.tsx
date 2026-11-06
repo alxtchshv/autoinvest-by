@@ -1,6 +1,6 @@
 import { cloneElement, createContext, isValidElement, useCallback, useContext, useEffect, useId, useRef, useState, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode } from "react";
 import { AlertCircle, CheckCircle2, Info, X, TriangleAlert, Car, GraduationCap, Gift, Heart, Home, Laptop, PiggyBank, Plane, Rocket, Shield } from "lucide-react";
-import { kop, pct } from "../lib/format";
+import { kop, pct, RUB } from "../lib/format";
 import { useSession } from "../lib/session";
 
 export function Logo({ size = 30 }: { size?: number }) {
@@ -76,17 +76,17 @@ export function Segmented<T extends string>({ value, onChange, options, label }:
   );
 }
 
-/** Сумма с копейками приглушённо: 1 234,56 BYN */
+/** Сумма с копейками приглушённо: 1 234,56 ⃅ */
 export function Money({ k, className = "", sign, cur = true, size }: { k: number; className?: string; sign?: boolean; cur?: boolean; size?: "xl" | "lg" }) {
   const s = kop(k, { sign });
   const [i, f] = s.split(",");
   const { hidden } = useHide();
-  if (hidden) return <span className={`money ${size ? "money-" + size : ""} ${className}`}>•••••{cur && (size === "xl" ? <span className="cur">BYN</span> : " BYN")}</span>;
+  if (hidden) return <span className={`money ${size ? "money-" + size : ""} ${className}`}>•••••{cur && (size === "xl" ? <span className="cur">{RUB}</span> : " " + RUB)}</span>;
   return (
     <span className={`money ${size ? "money-" + size : ""} ${className}`}>
       {i}
       <span className="kop">,{f}</span>
-      {cur && (size === "xl" ? <span className="cur">BYN</span> : " BYN")}
+      {cur && (size === "xl" ? <span className="cur">{RUB}</span> : " " + RUB)}
     </span>
   );
 }
@@ -97,12 +97,12 @@ export function Change({ v, k, className = "" }: { v?: number; k?: number; class
   const { hidden } = useHide();
   return (
     <span className={`num ${cls} ${className}`}>
-      {k !== undefined ? (hidden ? "•••" : kop(k, { sign: true }) + " BYN") : pct(v!, { sign: true })}
+      {k !== undefined ? (hidden ? "•••" : kop(k, { sign: true }) + " " + RUB) : pct(v!, { sign: true })}
     </span>
   );
 }
 
-const ICON_LABELS: Record<string, string> = { PAXG: "Au", USDT: "$", SPY: "500", BYCORP_USD: "$%", BYCORP_BYN: "Br%" };
+const ICON_LABELS: Record<string, string> = { PAXG: "Au", USDT: "$", SPY: "500", BYCORP_USD: "$%", BYCORP_BYN: RUB + "%" };
 
 export function AssetIcon({ symbol, color, size }: { symbol: string; color?: string; size?: "sm" | "lg" }) {
   const { config } = useSession();

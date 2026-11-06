@@ -26,7 +26,7 @@ export function OperationRow({ o, showPlan }: { o: Order; showPlan?: boolean }) 
         <div className="sub">{dateTime(o.created_at)}{showPlan ? ` · ${o.plan_name}` : ""}{o.status === "failed" && o.error ? ` · ${o.error}` : o.fills.length ? ` · ${o.fills.map((f) => f.asset).join(", ")}` : ""}</div>
       </div>
       <div className="end">
-        <div className={`num ${o.status === "failed" ? "faint" : ""}`} style={{ fontWeight: 600, textDecoration: o.status === "failed" ? "line-through" : undefined }}>{buy ? "−" : "+"}{kop(o.amount_kop)} BYN</div>
+        <div className={`num ${o.status === "failed" ? "faint" : ""}`} style={{ fontWeight: 600, textDecoration: o.status === "failed" ? "line-through" : undefined }}>{buy ? "−" : "+"}{kop(o.amount_kop)} ⃅</div>
         {o.status !== "filled" ? <OrderStatus s={o.status} /> : <div className="tiny muted">{o.card_last4 ? `•• ${o.card_last4}` : ""}</div>}
       </div>
     </Link>
@@ -215,7 +215,7 @@ function TopupModal({ plan, open, onClose, onDone }: MP) {
         } catch { /* */ }
       }}>
         <Field label="Сумма" error={s.fieldError("amount_kop") || (!s.field ? s.error : null)}>
-          <div className="input-affix"><input className="input amount-input" inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} autoFocus aria-label="Сумма" /><span className="affix" style={{ fontSize: 18 }}>BYN</span></div>
+          <div className="input-affix"><input className="input amount-input" inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} autoFocus aria-label="Сумма" /><span className="affix" style={{ fontSize: 18 }}>⃅</span></div>
         </Field>
         <div className="small muted">Спишем с карты •• {plan.card?.last4 || "—"} и купим {plan.allocations.map((a) => `${a.asset} ${a.weight_bp / 100}%`).join(", ")} по текущей цене. Комиссия сервиса ≈ {byn(fee)}.</div>
         <Button type="submit" variant="primary" size="lg" block busy={s.busy} disabled={!isFinite(k) || !plan.card}>Пополнить на {isFinite(k) ? byn(k) : "…"}</Button>
@@ -248,7 +248,7 @@ function WithdrawModal({ plan, open, onClose, onDone }: MP) {
         <Segmented label="Сколько" value={all ? "all" : "part"} onChange={(x) => setAll(x === "all")} options={[{ value: "part", label: "Часть" }, { value: "all", label: "Всё" }]} />
         {!all && (
           <Field label="Сумма" error={s.fieldError("amount_kop")}>
-            <div className="input-affix"><input className="input amount-input" inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} autoFocus aria-label="Сумма" placeholder="0" /><span className="affix" style={{ fontSize: 18 }}>BYN</span></div>
+            <div className="input-affix"><input className="input amount-input" inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} autoFocus aria-label="Сумма" placeholder="0" /><span className="affix" style={{ fontSize: 18 }}>⃅</span></div>
           </Field>
         )}
         <Field label="Пароль от аккаунта" error={s.fieldError("password")} hint="Подтверждаем вывод, чтобы деньги не увёл тот, кто получил доступ к вашему устройству">
@@ -289,10 +289,10 @@ function EditModal({ plan, open, onClose, onDone }: MP) {
         <Field label="Название"><Input value={name} maxLength={40} onChange={(e) => setName(e.target.value)} /></Field>
         <div className="icon-pick">{Object.entries(PLAN_ICONS).map(([k, I]) => <button key={k} type="button" aria-pressed={icon === k} aria-label={k} onClick={() => setIcon(k)}><I /></button>)}</div>
         <div className="grid2">
-          <Field label="Цель, BYN" hint="Пусто — без цели"><Input inputMode="decimal" value={goal} onChange={(e) => setGoal(e.target.value)} /></Field>
+          <Field label="Цель, ⃅" hint="Пусто — без цели"><Input inputMode="decimal" value={goal} onChange={(e) => setGoal(e.target.value)} /></Field>
           <Field label="Срок"><Input type="date" value={goalDate} onChange={(e) => setGoalDate(e.target.value)} /></Field>
         </div>
-        <Field label="Сумма пополнения, BYN"><Input inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} /></Field>
+        <Field label="Сумма пополнения, ⃅"><Input inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} /></Field>
         <SchedulePicker value={sched} onChange={setSched} />
         {!!cards.data?.cards.length && (
           <Field label="Карта">

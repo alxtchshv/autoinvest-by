@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -159,12 +160,27 @@ func main() {
 
 	srv := &api.Server{Cfg: cfg, St: st, DB: d, Hub: hub, En: en, Pay: pay, Sandbox: sandbox, N: n, Bot: bot, Log: log,
 		Static: web.Dist(), Version: version, Started: time.Now()}
+	if cfg.Market != "fixture" {
+		go srv.WarmShowcase(ctx)
+	}
 	httpSrv := &http.Server{Addr: cfg.Addr, Handler: srv.Handler(), ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second,
 		WriteTimeout: 60 * time.Second, IdleTimeout: 120 * time.Second}
 
+	// Порт занимаем до сообщения «запущен»: если он занят (обычно — уже работающей копией), говорим об этом прямо.
+	ln, err := net.Listen("tcp", cfg.Addr)
+	if err != nil {
+		if errors.Is(err, syscall.EADDRINUSE) {
+			fmt.Fprintf(os.Stderr, "\nПорт %s уже занят. Скорее всего, AutoInvest уже запущен — откройте %s.\n"+
+				"Остановить прежнюю копию: закройте её окно или Ctrl+C (тестовый стенд: make test-stand-stop). Другой порт: ADDR=:8091 PUBLIC_URL=http://localhost:8091\n\n",
+				cfg.Addr, cfg.PublicURL)
+			os.Exit(1)
+		}
+		log.Error("http", "err", err)
+		os.Exit(1)
+	}
 	go func() {
 		log.Info("AutoInvest запущен", "addr", cfg.Addr, "url", cfg.PublicURL, "payments", cfg.Mode(), "broker", broker.Name(), "market", cfg.Market)
-		if err := httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		if err := httpSrv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Error("http", "err", err)
 			stop()
 		}

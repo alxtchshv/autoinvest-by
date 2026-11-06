@@ -1,10 +1,12 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"time"
 
 	"autoinvest/internal/engine"
@@ -152,4 +154,76 @@ func (s *Server) backtest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, res)
+}
+
+// showcase — «машина времени» на главной: все стратегии и активы на одном отрезке, лучшие сверху.
+// Суммы и сроки — только из коротких списков, а результат кэшируется на час: расчёт тяжёлый,
+// а главную открывают все подряд.
+func (s *Server) showcase(w http.ResponseWriter, r *http.Request) {
+	amount, _ := strconv.ParseInt(r.URL.Query().Get("amount_kop"), 10, 64)
+	years, _ := strconv.Atoi(r.URL.Query().Get("years"))
+	switch amount {
+	case 1000, 2000, 5000, 10000:
+	default:
+		amount = 2000
+	}
+	switch years {
+	case 3, 5, 7:
+	default:
+		years = 7
+	}
+	items, err := s.showcaseFor(r.Context(), amount, years, false)
+	if err != nil {
+		writeErr(w, http.StatusServiceUnavailable, "История цен сейчас недоступна. Попробуйте через минуту")
+		return
+	}
+	writeJSON(w, 200, map[string]any{"items": items, "amount_kop": amount, "years": years})
+}
+
+var (
+	showcaseAmounts = []int64{1000, 2000, 5000, 10000}
+	showcaseYears   = []int{7, 5, 3}
+)
+
+func (s *Server) showcaseFor(ctx context.Context, amount int64, years int, force bool) ([]engine.ShowcaseItem, error) {
+	key := fmt.Sprintf("%d/%d", amount, years)
+	s.showMu.Lock()
+	defer s.showMu.Unlock()
+	if e, ok := s.show[key]; ok && !force && time.Since(e.at) < time.Hour {
+		return e.items, nil
+	}
+	items, err := s.En.Showcase(ctx, amount, float64(years))
+	if err != nil {
+		if e, ok := s.show[key]; ok && time.Since(e.at) < 6*time.Hour {
+			return e.items, nil // источник истории моргнул — покажем прошлый расчёт
+		}
+		return nil, err
+	}
+	if s.show == nil {
+		s.show = map[string]showcaseEntry{}
+	}
+	s.show[key] = showcaseEntry{at: time.Now(), items: items}
+	return items, nil
+}
+
+// WarmShowcase заранее считает витрину для всех сумм и сроков, чтобы главная открывалась сразу,
+// и обновляет её раньше, чем истечёт часовой кэш.
+func (s *Server) WarmShowcase(ctx context.Context) {
+	t := time.NewTimer(3 * time.Second) // дать хабу загрузить курс НБРБ
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+		for _, y := range showcaseYears {
+			for _, a := range showcaseAmounts {
+				if _, err := s.showcaseFor(ctx, a, y, true); err != nil && ctx.Err() == nil {
+					s.Log.Warn("витрина доходности не посчитана", "amount", a, "years", y, "err", err)
+				}
+			}
+		}
+		t.Reset(50 * time.Minute)
+	}
 }

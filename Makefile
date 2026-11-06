@@ -1,5 +1,5 @@
 # AutoInvest — команды для macOS и Linux (на Windows: run.bat, create_demo.bat, create_admin.bat)
-.PHONY: help run demo admin build web test vet fmt clean dev-web test-stand test-stand-reset
+.PHONY: help run demo admin build web test vet fmt clean dev-web test-stand test-stand-reset test-stand-stop
 
 help:           ## список команд
 	@grep -E '^[a-z-]+:.*## ' Makefile | sed 's/:.*## /\t— /'
@@ -25,6 +25,9 @@ test-stand:     ## тестовый стенд с фейковыми деньг�
 
 test-stand-reset: ## то же, но с чистой тестовой базой
 	./scripts/test-stand.sh reset
+
+test-stand-stop: ## остановить тестовый стенд
+	./scripts/test-stand.sh stop
 
 test:           ## все тесты Go
 	go test ./internal/...

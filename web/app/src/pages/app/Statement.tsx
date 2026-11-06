@@ -1,7 +1,7 @@
 import { Link, useSearchParams } from "react-router-dom";
 import { ArrowLeft, Printer } from "lucide-react";
 import { api } from "../../lib/api";
-import { brandLabel, date, dateTime, kop, price, qty } from "../../lib/format";
+import { brandLabel, byn, date, dateTime, kop, price, qty } from "../../lib/format";
 import { useLoad, useTitle } from "../../lib/hooks";
 import type { Order } from "../../lib/types";
 import { Button, LoadError, Logo, Notice, PageLoader } from "../../components/ui";
@@ -10,7 +10,7 @@ type StatementData = {
   holder: { name: string; email: string };
   from: number; to: number; generated_at: number; total: number; truncated: boolean;
   operations: (Order & { venue: string })[];
-  totals: { deposited: string; withdrawn: string; fees: string };
+  totals: { deposited_kop: number; withdrawn_kop: number; fees_kop: number };
   live_broker: boolean; test_money: boolean;
 };
 
@@ -46,9 +46,9 @@ export default function Statement() {
           </div>
           {!s.live_broker && <Notice kind="warn">Учебный счёт: операции учтены по реальным биржевым ценам, но у оператора криптоплатформы не исполнялись{s.test_money ? ", деньги с карт не списывались" : ""}.</Notice>}
           <dl className="kv">
-            <dt>Пополнено</dt><dd>{s.totals.deposited}</dd>
-            <dt>Выведено</dt><dd>{s.totals.withdrawn}</dd>
-            <dt>Комиссии сервиса</dt><dd>{s.totals.fees}</dd>
+            <dt>Пополнено</dt><dd>{byn(s.totals.deposited_kop)}</dd>
+            <dt>Выведено</dt><dd>{byn(s.totals.withdrawn_kop)}</dd>
+            <dt>Комиссии сервиса</dt><dd>{byn(s.totals.fees_kop)}</dd>
             <dt>Операций</dt><dd>{s.total}{s.truncated ? " (показаны последние 500)" : ""}</dd>
           </dl>
           {s.operations.length === 0 ? <p className="muted">За этот период операций нет.</p> : (

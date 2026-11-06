@@ -30,7 +30,7 @@ export default function Market() {
             <span className="row g4" style={{ display: "inline-flex" }}><span className="dot" style={{ background: connected ? "var(--up)" : "var(--faint)" }} />{connected && lastTick ? "обновляется в реальном времени" : "переподключение…"}</span>
           </p>
         </div>
-        {rates && <div className="small muted num" style={{ textAlign: "right" }}>USD {price(rates.usd, "BYN")}<br />EUR {price(rates.eur, "BYN")}</div>}
+        {rates && <div className="small muted num" style={{ textAlign: "right" }}>USD {price(rates.usd)}<br />EUR {price(rates.eur)}</div>}
       </div>
       <div className="sheet">
         <div className="table-wrap">

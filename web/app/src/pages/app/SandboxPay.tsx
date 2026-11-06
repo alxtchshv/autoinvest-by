@@ -33,7 +33,7 @@ export default function SandboxPay() {
           <form className="sheet sheet-pad stack g16" onSubmit={submit}>
             <div>
               <h2>Привязка карты</h2>
-              <p className="small muted mt8">AutoInvest · {data!.email}. Будет заблокировано 1,00 BYN и сразу возвращено.</p>
+              <p className="small muted mt8">AutoInvest · {data!.email}. Будет заблокировано 1,00 ⃅ и сразу возвращено.</p>
             </div>
             {data!.status !== "pending" || data!.expired ? (
               <Notice kind="warn">Сессия оплаты завершена. Вернитесь в приложение и начните привязку заново.</Notice>

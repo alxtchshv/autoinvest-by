@@ -333,3 +333,28 @@ func TestClosePlanWithdrawsAndBlocksBuys(t *testing.T) {
 		t.Fatalf("buy into closed plan: %v", err)
 	}
 }
+
+func TestShowcaseSortedAndComparable(t *testing.T) {
+	e := setup(t)
+	for i := 0; i < 50 && !e.en.Hub.HistoryReady(); i++ {
+		time.Sleep(20 * time.Millisecond)
+	}
+	items, err := e.en.Showcase(context.Background(), 2000, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) < 3 {
+		t.Fatalf("too few items: %d", len(items))
+	}
+	for i, it := range items {
+		if it.InvestedKop <= 0 || it.ValueKop <= 0 || len(it.Points) == 0 || it.Name == "" {
+			t.Errorf("bad item %+v", it.ID)
+		}
+		if i > 0 && it.ProfitPct > items[i-1].ProfitPct {
+			t.Errorf("not sorted at %d", i)
+		}
+		if it.Symbol == "USDT" {
+			t.Error("USDT duplicates strategy «Доллар»")
+		}
+	}
+}

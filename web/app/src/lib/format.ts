@@ -2,6 +2,9 @@
 
 const TZ = "Europe/Minsk";
 const nbsp = " ";
+/** Знак белорусского рубля (НБРБ, 27.01.2026; U+20C5). Пока его нет в системных шрифтах,
+ *  поэтому сайт подключает свой шрифт byn-sign-*.woff2 через unicode-range — см. styles/base.css. */
+export const RUB = "⃅";
 
 export function groupInt(n: number): string {
   const s = Math.trunc(Math.abs(n)).toString();
@@ -19,11 +22,11 @@ export function kop(k: number, opts: { sign?: boolean } = {}): string {
 }
 
 export function byn(k: number, opts: { sign?: boolean } = {}): string {
-  return kop(k, opts) + nbsp + "BYN";
+  return kop(k, opts) + nbsp + RUB;
 }
 
 /** Цена с разумной точностью: 284 491 / 3 412,50 / 2,9612 */
-export function price(v: number, cur = "BYN"): string {
+export function price(v: number, cur = RUB): string {
   if (!isFinite(v)) return "—";
   let digits = 2;
   if (v >= 10000) digits = 0;

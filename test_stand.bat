@@ -15,6 +15,15 @@ set BEPAID_SHOP_ID=
 set BEPAID_SECRET_KEY=
 set BEPAID_TEST=true
 
+netstat -ano | findstr /r /c:":8090 .*LISTENING" >nul
+if %errorlevel%==0 (
+    echo Стенд уже запущен: http://localhost:8090 — просто откройте его в браузере.
+    echo Чтобы перезапустить, закройте окно с работающим стендом и запустите этот файл снова.
+    start http://localhost:8090
+    pause
+    exit /b 0
+)
+
 if /i "%~1"=="reset" (
     if exist data-test rmdir /s /q data-test
     echo Тестовая база удалена

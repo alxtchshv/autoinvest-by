@@ -204,8 +204,8 @@ export default function PlanNew() {
                 </div>
               </Field>
               <div className="grid2">
-                <Field label="Цель, BYN" hint="Необязательно — покажем прогресс и прогноз" error={goal && (!isFinite(goalKop) || goalKop < 1000) ? "Не меньше 10 BYN" : null}>
-                  <div className="input-affix"><Input inputMode="decimal" value={goal} onChange={(e) => setGoal(e.target.value)} placeholder="3 000" /><span className="affix">BYN</span></div>
+                <Field label="Цель, ⃅" hint="Необязательно — покажем прогресс и прогноз" error={goal && (!isFinite(goalKop) || goalKop < 1000) ? "Не меньше 10 ⃅" : null}>
+                  <div className="input-affix"><Input inputMode="decimal" value={goal} onChange={(e) => setGoal(e.target.value)} placeholder="3 000" /><span className="affix">⃅</span></div>
                 </Field>
                 <Field label="Хочу накопить к" hint="Необязательно">
                   <Input type="date" value={goalDate} min={new Date(Date.now() + 86400000).toISOString().slice(0, 10)} onChange={(e) => setGoalDate(e.target.value)} />
@@ -216,8 +216,8 @@ export default function PlanNew() {
           {step === 1 && (
             <>
               <Field label="Сумма одного пополнения" error={amount ? amountErr : null}>
-                <div className="input-affix"><input className="input amount-input" inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} aria-label="Сумма в BYN" autoFocus /><span className="affix" style={{ fontSize: 18 }}>BYN</span></div>
-                <div className="row g8 wrap mt8">{AMOUNTS.map((a) => <button key={a} type="button" className="chip" aria-pressed={amountKop === a} onClick={() => setAmount(String(a / 100))}>{kop(a).replace(",00", "")} BYN</button>)}</div>
+                <div className="input-affix"><input className="input amount-input" inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} aria-label="Сумма в рублях" autoFocus /><span className="affix" style={{ fontSize: 18 }}>⃅</span></div>
+                <div className="row g8 wrap mt8">{AMOUNTS.map((a) => <button key={a} type="button" className="chip" aria-pressed={amountKop === a} onClick={() => setAmount(String(a / 100))}>{kop(a).replace(",00", "")} ⃅</button>)}</div>
               </Field>
               <SchedulePicker value={sched} onChange={setSched} />
               {sched.frequency !== "manual" && !amountErr && (

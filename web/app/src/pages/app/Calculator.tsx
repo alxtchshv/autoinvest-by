@@ -73,8 +73,8 @@ export default function Calculator({ publicPage }: { publicPage?: boolean }) {
               <optgroup label="Один актив">{options.filter((o) => o.id.startsWith("a:")).map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}</optgroup>
             </select>
           </Field>
-          <Field label="Сумма пополнения" error={!isFinite(k) || k < 100 ? "От 1 BYN" : null}>
-            <div className="input-affix"><Input inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} /><span className="affix">BYN</span></div>
+          <Field label="Сумма пополнения" error={!isFinite(k) || k < 100 ? "От 1 ⃅" : null}>
+            <div className="input-affix"><Input inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} /><span className="affix">⃅</span></div>
           </Field>
           <Field label="Как часто">
             <Segmented label="Частота" value={freq} onChange={setFreq} options={[{ value: "daily", label: "День" }, { value: "weekly", label: "Неделя" }, { value: "monthly", label: "Месяц" }]} />
@@ -82,7 +82,7 @@ export default function Calculator({ publicPage }: { publicPage?: boolean }) {
           <Field label="Сколько лет назад начать">
             <div className="row g8 wrap">{YEARS.map((y) => <button key={y} className="chip" aria-pressed={years === y} onClick={() => setYears(y)}>{y} {y === 1 ? "год" : y < 5 ? "года" : "лет"}</button>)}</div>
           </Field>
-          <Field label="Ставка депозита для сравнения" hint="Годовая, в BYN">
+          <Field label="Ставка депозита для сравнения" hint="Годовая, в белорусских рублях">
             <div className="input-affix"><Input inputMode="decimal" value={dep} onChange={(e) => setDep(e.target.value)} /><span className="affix">%</span></div>
           </Field>
         </section>
@@ -95,7 +95,7 @@ export default function Calculator({ publicPage }: { publicPage?: boolean }) {
                 {res.note && <Notice kind="info">{res.note}</Notice>}
                 <div className="grid3">
                   <div><div className="small muted">Вложили бы</div><div className="money-lg num">{byn(res.invested_kop)}</div><div className="tiny muted">{res.purchases} пополнений с {dateNum(new Date(res.from).getTime() / 1000)}</div></div>
-                  <div><div className="small muted">Было бы сейчас</div><div className={`money-lg num ${profit >= 0 ? "up" : "down"}`}>{byn(res.value_kop)}</div><div className="tiny"><span className={profit >= 0 ? "up" : "down"}>{kop(profit, { sign: true })} BYN · {pct(res.profit_pct)}</span></div></div>
+                  <div><div className="small muted">Было бы сейчас</div><div className={`money-lg num ${profit >= 0 ? "up" : "down"}`}>{byn(res.value_kop)}</div><div className="tiny"><span className={profit >= 0 ? "up" : "down"}>{kop(profit, { sign: true })} ⃅ · {pct(res.profit_pct)}</span></div></div>
                   <div><div className="small muted">Худшая просадка</div><div className="money-lg num down">{pct(res.max_drawdown)}</div><div className="tiny muted">от пика стоимости по пути</div></div>
                 </div>
                 <div style={{ opacity: busy ? 0.5 : 1, transition: "opacity .15s" }}>

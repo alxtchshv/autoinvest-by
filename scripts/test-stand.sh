@@ -3,12 +3,44 @@
 # по реальным ценам. Настоящие деньги здесь не участвуют ни при каких настройках .env.
 #   ./scripts/test-stand.sh          — запустить (создаст демо-аккаунт и тестового админа)
 #   ./scripts/test-stand.sh reset    — стереть тестовую базу и начать с чистого листа
+#   ./scripts/test-stand.sh stop     — остановить стенд, запущенный в фоне или в другом окне
 set -eu
 cd "$(dirname "$0")/.."
 
 export DATA_DIR=data-test PAYMENTS=sandbox BROKER=paper MARKET=live APP_ENV=development
 export ADDR="${ADDR:-:8090}" PUBLIC_URL="${PUBLIC_URL:-http://localhost:8090}"
 export BEPAID_SHOP_ID= BEPAID_SECRET_KEY= BEPAID_TEST=true
+
+PORT="${ADDR##*:}"
+# pid процесса, который слушает порт стенда (пусто, если порт свободен)
+stand_pid() { lsof -nP -t -iTCP:"$PORT" -sTCP:LISTEN 2>/dev/null | head -1; }
+
+if [ "${1:-}" = "stop" ] || [ "${1:-}" = "reset" ]; then
+  pid="$(stand_pid)"
+  if [ -n "$pid" ]; then
+    if ps -p "$pid" -o comm= | grep -q autoinvest; then
+      kill "$pid" && echo "Стенд на порту $PORT остановлен"
+      i=0; while [ -n "$(stand_pid)" ] && [ $i -lt 50 ]; do sleep 0.1; i=$((i+1)); done
+    else
+      echo "Порт $PORT занят другой программой ($(ps -p "$pid" -o comm=)), её не трогаю."; exit 1
+    fi
+  elif [ "${1:-}" = "stop" ]; then
+    echo "Стенд не запущен"
+  fi
+  [ "${1:-}" = "stop" ] && exit 0
+fi
+
+pid="$(stand_pid)"
+if [ -n "$pid" ]; then
+  if ps -p "$pid" -o comm= | grep -q autoinvest; then
+    echo "Стенд уже запущен: $PUBLIC_URL — просто откройте его в браузере."
+    echo "Перезапустить: make test-stand-stop && make test-stand"
+    exit 0
+  fi
+  echo "Порт $PORT занят другой программой ($(ps -p "$pid" -o comm=)). Запустите на другом порту:"
+  echo "  ADDR=:8091 PUBLIC_URL=http://localhost:8091 ./scripts/test-stand.sh"
+  exit 1
+fi
 
 if [ "${1:-}" = "reset" ]; then
   rm -rf data-test

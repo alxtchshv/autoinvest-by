@@ -4,7 +4,7 @@ import {
   type IChartApi, type ISeriesApi, type Time, type UTCTimestamp,
 } from "lightweight-charts";
 import { api } from "../lib/api";
-import { dateNum, kop, price } from "../lib/format";
+import { dateNum, kop, price, RUB } from "../lib/format";
 import { useMarket } from "../lib/session";
 import type { Candle, Snapshot } from "../lib/types";
 import { Segmented } from "./ui";
@@ -144,7 +144,7 @@ export function PriceChart({ symbol, stable }: { symbol: string; stable?: boolea
   }, [chart]);
 
   const shown = legend || last;
-  const cur = currency === "BYN" ? "BYN" : "$";
+  const cur = currency === "BYN" ? RUB : "$";
   return (
     <div>
       <div className="row between wrap g12" style={{ marginBottom: 12 }}>
@@ -152,7 +152,7 @@ export function PriceChart({ symbol, stable }: { symbol: string; stable?: boolea
           {!stable && <Segmented label="Интервал" value={interval} onChange={setIntervalV} options={INTERVALS.map((i) => ({ value: i.value, label: i.label }))} />}
           {!stable && <Segmented label="Вид графика" value={kind} onChange={setKind} options={[{ value: "candles", label: "Свечи" }, { value: "line", label: "Линия" }]} />}
         </div>
-        <Segmented label="Валюта" value={currency} onChange={setCurrency} options={[{ value: "BYN", label: "BYN" }, { value: "USD", label: "USD" }]} />
+        <Segmented label="Валюта" value={currency} onChange={setCurrency} options={[{ value: "BYN", label: RUB }, { value: "USD", label: "$" }]} />
       </div>
       <div className="small muted num" style={{ minHeight: 18, marginBottom: 4 }}>
         {shown && !stable && (

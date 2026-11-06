@@ -512,7 +512,7 @@ func (e *Engine) withdrawLocked(ctx context.Context, userID, planID, amount int6
 	// «почти всё» (остаток меньше 0,5%) выводим целиком, чтобы не оставлять пыль
 	all := amount <= 0 || amount >= total*995/1000
 	if !all && amount < 100 {
-		return nil, errors.New("Минимальная сумма вывода — 1,00 BYN")
+		return nil, errors.New("Минимальная сумма вывода — 1,00 руб.")
 	}
 	frac := 1.0
 	payout := total

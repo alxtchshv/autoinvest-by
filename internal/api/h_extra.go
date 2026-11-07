@@ -69,6 +69,7 @@ func (s *Server) exportMyData(w http.ResponseWriter, r *http.Request) {
 	consents, _ := s.St.Consents(ctx, u.ID)
 	audit, _ := s.St.AuditFor(ctx, u.ID, 500)
 	sessions, _ := s.St.ListSessions(ctx, u.ID)
+	tg, _ := s.St.TelegramLog(ctx, u.ID, 5000)
 	for i := range sessions {
 		sessions[i].ID = ""
 	}
@@ -82,7 +83,7 @@ func (s *Server) exportMyData(w http.ResponseWriter, r *http.Request) {
 		"operator":    "AutoInvest",
 		"note":        "Выгрузка персональных данных по запросу субъекта (Закон Республики Беларусь № 99-З). Токены карт и хеши паролей не включаются.",
 		"profile":     u, "kyc": kyc, "cards": cards, "plans": plans, "operations": orders,
-		"consents": consents, "audit_log": audit, "sessions": sessions,
+		"consents": consents, "audit_log": audit, "sessions": sessions, "telegram_chat": nz(tg),
 	})
 }
 

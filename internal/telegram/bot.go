@@ -86,6 +86,88 @@ func (b *Bot) call(ctx context.Context, method string, payload any, out any) err
 	return nil
 }
 
+// ---------------------------------------------------------------- журнал переписки
+
+// Каждое сообщение человека и каждый ответ бота пишутся в telegram_log с привязкой к пользователю —
+// поддержка видит переписку в админке, человек получает её в выгрузке своих данных.
+// Коды для входа и одноразовые ссылки привязки в журнал не попадают.
+var (
+	codeRe  = regexp.MustCompile(`\b\d{6}\b`)
+	tagRe   = regexp.MustCompile(`<[^>]+>`)
+	unescHT = strings.NewReplacer("&lt;", "<", "&gt;", ">", "&amp;", "&")
+)
+
+func maskSecrets(text string) string {
+	if strings.HasPrefix(text, "/start ") {
+		return "/start •••"
+	}
+	if strings.Contains(strings.ToLower(text), "код") {
+		text = codeRe.ReplaceAllString(text, "••••••")
+	}
+	return text
+}
+
+func plainText(html string) string { return unescHT.Replace(tagRe.ReplaceAllString(html, "")) }
+
+func (b *Bot) userIDByChat(ctx context.Context, chat int64) *int64 {
+	if b.St == nil {
+		return nil
+	}
+	if u, err := b.St.UserByTelegram(ctx, chat); err == nil {
+		return &u.ID
+	}
+	return nil
+}
+
+func (b *Bot) logOut(chat int64, kind, text string) {
+	if b.St == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	b.St.LogTelegram(ctx, chat, b.userIDByChat(ctx, chat), "out", kind, maskSecrets(plainText(text)))
+}
+
+// buttonLabels — что означают кнопки, чтобы журнал читался без расшифровки кодов.
+var buttonLabels = map[string]string{
+	"m": "Меню", "b": "Баланс", "p": "Копилки", "pl": "Открыть копилку", "pp": "Поставить копилку на паузу", "pr": "Включить копилку",
+	"o": "Операции", "n": "Уведомления", "nt": "Переключить: сообщения в Telegram", "nm": "Переключить: движения рынка",
+	"ne": "Переключить: письма на почту", "s": "Написать в поддержку", "sx": "Отмена",
+}
+
+func (b *Bot) logIn(ctx context.Context, u update) {
+	if b.St == nil {
+		return
+	}
+	switch {
+	case u.Callback != nil && u.Callback.Message != nil:
+		cmd, arg, _ := strings.Cut(u.Callback.Data, ":")
+		label := buttonLabels[cmd]
+		if label == "" {
+			label = u.Callback.Data
+		}
+		if arg != "" {
+			label += " #" + arg
+		}
+		chat := u.Callback.Message.Chat.ID
+		b.St.LogTelegram(ctx, chat, b.userIDByChat(ctx, chat), "in", "button", "[кнопка] "+label)
+	case u.Message != nil:
+		chat := u.Message.Chat.ID
+		uid := b.userIDByChat(ctx, chat)
+		if u.Message.Chat.Type != "private" {
+			uid = b.userIDByChat(ctx, u.Message.From.ID) // в группе поддержки — сотрудник, который написал
+		}
+		kind, text := "text", u.Message.Text
+		switch {
+		case u.Message.Contact != nil:
+			kind, text = "contact", "[поделился номером] "+u.Message.Contact.PhoneNumber
+		case strings.HasPrefix(text, "/"):
+			kind = "command"
+		}
+		b.St.LogTelegram(ctx, chat, uid, "in", kind, maskSecrets(text))
+	}
+}
+
 // ---------------------------------------------------------------- клавиатуры
 
 type btn map[string]string
@@ -140,7 +222,13 @@ func (b *Bot) send(chatID int64, text string, markup map[string]any) error {
 	if markup != nil {
 		p["reply_markup"] = markup
 	}
-	return b.call(ctx, "sendMessage", p, nil)
+	err := b.call(ctx, "sendMessage", p, nil)
+	kind := "message"
+	if err != nil {
+		kind = "error"
+	}
+	b.logOut(chatID, kind, text)
+	return err
 }
 
 // edit — меняем сообщение с кнопками на месте (так меню не засоряет чат); если не вышло — новое сообщение.
@@ -153,7 +241,9 @@ func (b *Bot) edit(chatID, msgID int64, text string, markup map[string]any) {
 	}
 	if err := b.call(ctx, "editMessageText", p, nil); err != nil && !strings.Contains(err.Error(), "not modified") {
 		b.send(chatID, text, markup)
+		return
 	}
+	b.logOut(chatID, "edit", text)
 }
 
 // Check проверяет токен, узнаёт имя бота и ставит список команд.
@@ -229,6 +319,7 @@ type update struct {
 func (b *Bot) Run(ctx context.Context) {
 	var offset int64
 	backoff := time.Second
+	var purged time.Time
 	for ctx.Err() == nil {
 		var ups []update
 		err := b.call(ctx, "getUpdates", map[string]any{"offset": offset, "timeout": 25, "allowed_updates": []string{"message", "callback_query"}}, &ups)
@@ -242,6 +333,10 @@ func (b *Bot) Run(ctx context.Context) {
 			continue
 		}
 		backoff = time.Second
+		if time.Since(purged) > 24*time.Hour && b.St != nil {
+			b.St.PurgeTelegramLog(ctx, 365) // переписку храним год
+			purged = time.Now()
+		}
 		for _, u := range ups {
 			offset = u.UpdateID + 1
 			b.Handle(ctx, u)
@@ -256,6 +351,7 @@ func (b *Bot) Handle(ctx context.Context, u update) {
 			b.Log.Error("telegram: паника в обработчике", "err", v)
 		}
 	}()
+	b.logIn(ctx, u)
 	switch {
 	case u.Callback != nil && u.Callback.Message != nil:
 		b.call(ctx, "answerCallbackQuery", map[string]any{"callback_query_id": u.Callback.ID}, nil)
@@ -666,6 +762,8 @@ func (b *Bot) bind(ctx context.Context, chat int64, username, code string) {
 		username = username[:64]
 	}
 	b.St.UpdateUserFields(ctx, uid, map[string]any{"telegram_chat_id": chat, "telegram_username": username, "notify_telegram": true})
+	// сообщения до привязки (/start) тоже относим к этому пользователю
+	b.St.DB.ExecContext(ctx, `UPDATE telegram_log SET user_id=? WHERE chat_id=? AND user_id IS NULL AND created_at>?`, uid, chat, store.Now()-600)
 	b.St.Audit(ctx, uid, uid, "telegram.link", "@"+username, "")
 	u, _ := b.St.UserByID(ctx, uid)
 	name := ""

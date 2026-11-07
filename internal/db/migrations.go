@@ -326,4 +326,18 @@ CREATE TABLE passkeys (
 );
 CREATE INDEX passkeys_user ON passkeys(user_id);
 `,
+	// переписка с Telegram-ботом по каждому пользователю (для поддержки и разбора спорных ситуаций)
+	`
+CREATE TABLE telegram_log (
+	id         INTEGER PRIMARY KEY,
+	chat_id    INTEGER NOT NULL,
+	user_id    INTEGER REFERENCES users(id) ON DELETE SET NULL,
+	dir        TEXT NOT NULL,            -- in | out
+	kind       TEXT NOT NULL DEFAULT '', -- text | command | button | contact | message | edit
+	text       TEXT NOT NULL DEFAULT '',
+	created_at INTEGER NOT NULL
+);
+CREATE INDEX telegram_log_user ON telegram_log(user_id, id);
+CREATE INDEX telegram_log_chat ON telegram_log(chat_id, id);
+`,
 }

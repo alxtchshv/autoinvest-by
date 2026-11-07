@@ -83,7 +83,8 @@ func (s *Server) adminUser(w http.ResponseWriter, r *http.Request) {
 	kyc, _ := s.St.KYC(r.Context(), u.ID)
 	audit, _ := s.St.AuditFor(r.Context(), u.ID, 50)
 	tickets, _ := s.St.Tickets(r.Context(), u.ID, "", 50)
-	writeJSON(w, 200, map[string]any{"user": u, "is_pro": u.IsPro(), "plans": views, "cards": nz(cards), "orders": nz(orders), "kyc": kyc, "audit": nz(audit), "tickets": tickets})
+	tg, _ := s.St.TelegramLog(r.Context(), u.ID, 300)
+	writeJSON(w, 200, map[string]any{"user": u, "is_pro": u.IsPro(), "plans": views, "cards": nz(cards), "orders": nz(orders), "kyc": kyc, "audit": nz(audit), "tickets": tickets, "telegram": nz(tg)})
 }
 
 func nz[T any](v []T) []T {

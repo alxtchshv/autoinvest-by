@@ -207,7 +207,7 @@ export function AdminUser() {
   const { id } = useParams();
   const { me } = useSession();
   const toast = useToast();
-  const { data, error, loading, reload } = useLoad(() => api.get<{ user: User; is_pro: boolean; plans: Plan[]; cards: Card[]; orders: Order[]; kyc: KYC | null; audit: { action: string; details: string; ip: string; created_at: number }[]; tickets: Ticket[] }>(`/admin/users/${id}`), [id]);
+  const { data, error, loading, reload } = useLoad(() => api.get<{ user: User; is_pro: boolean; plans: Plan[]; cards: Card[]; orders: Order[]; kyc: KYC | null; audit: { action: string; details: string; ip: string; created_at: number }[]; tickets: Ticket[]; telegram: { id: number; dir: "in" | "out"; kind: string; text: string; created_at: number }[] }>(`/admin/users/${id}`), [id]);
   const [days, setDays] = useState("30");
   useTitle(data?.user.name || "Пользователь");
   if (loading && !data) return <PageLoader />;
@@ -264,6 +264,19 @@ export function AdminUser() {
             {isAdmin && <div className="row g8 mt16"><Input style={{ width: 90, height: 34 }} value={days} onChange={(e) => setDays(e.target.value)} aria-label="Дней Pro" /><Button size="sm" onClick={() => act("pro", { days: Number(days) }, "Pro продлён")}>Выдать Pro (дней)</Button></div>}
           </div></section>
           {d.tickets.length > 0 && <section className="sheet"><div className="sheet-head"><h2>Обращения</h2></div><div className="list">{d.tickets.map((t) => <Link key={t.id} to={`/admin/tickets/${t.id}`} className="list-row"><div className="grow"><div className="title">{t.subject}</div><div className="sub">{ago(t.updated_at)}</div></div><span className="badge">{t.status}</span></Link>)}</div></section>}
+          <section className="sheet">
+            <div className="sheet-head"><h2>Переписка в Telegram</h2><span className="small muted">{d.telegram.length ? `последние ${d.telegram.length}` : "нет сообщений"}</span></div>
+            {d.telegram.length > 0 && (
+              <div className="tg-log">
+                {[...d.telegram].reverse().map((m) => (
+                  <div key={m.id} className={`tg-log-row ${m.dir}`}>
+                    <div className="tg-log-bubble">{m.text || "—"}</div>
+                    <div className="tiny muted">{m.dir === "in" ? "клиент" : "бот"} · {dateTime(m.created_at)}{m.kind === "error" ? " · не доставлено" : ""}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
           <section className="sheet"><div className="sheet-head"><h2>Журнал</h2></div><div className="table-wrap"><table className="table"><tbody>{d.audit.slice(0, 25).map((a, i) => <tr key={i}><td className="small">{a.action}<div className="tiny muted">{a.details}</div></td><td className="small muted r nowrap">{dateTime(a.created_at)}</td></tr>)}</tbody></table></div></section>
         </div>
       </div>

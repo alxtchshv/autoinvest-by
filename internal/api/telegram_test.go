@@ -119,6 +119,22 @@ func TestTelegramBotInSandbox(t *testing.T) {
 		t.Fatalf("вход по номеру и паролю: %d", code)
 	}
 
+	// журнал переписки: всё по пользователю, коды и ссылка привязки замаскированы
+	me2, _ := s.St.UserByEmail(context.Background(), "tg@test.by")
+	log, _ := s.St.TelegramLog(context.Background(), me2.ID, 500)
+	var all strings.Builder
+	for _, e := range log {
+		all.WriteString(e.Dir + ":" + e.Text + "\n")
+	}
+	for _, want := range []string{"in:/start •••", "in:[кнопка] Копилки", "in:[кнопка] Поставить копилку на паузу #" + id, "out:Готово", "in:[поделился номером]"} {
+		if !strings.Contains(all.String(), want) {
+			t.Fatalf("в журнале нет %q:\n%s", want, all.String())
+		}
+	}
+	if strings.Contains(all.String(), sent.TestCode) || strings.Contains(all.String(), code) {
+		t.Fatal("код входа или ссылка привязки попали в журнал")
+	}
+
 	// вопрос в поддержку одним сообщением → обращение на сайте
 	c.do("POST", "/api/v1/telegram/sandbox/send", map[string]any{"text": "/support"}, nil)
 	waitBot(t, c, "Напишите вопрос")

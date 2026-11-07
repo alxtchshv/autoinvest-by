@@ -264,6 +264,13 @@ func (b *Bot) Handle(ctx context.Context, u update) {
 		b.onContact(ctx, u.Message)
 	case u.Message != nil && u.Message.Chat.Type == "private":
 		b.handle(ctx, u.Message.Chat.ID, u.Message.From.Username, strings.TrimSpace(u.Message.Text))
+	case u.Message != nil && u.Message.Chat.Type != "private" && strings.HasPrefix(strings.ToLower(strings.TrimSpace(u.Message.Text)), "/chatid"):
+		// помощь при настройке: узнать ID группы поддержки прямо в Telegram
+		note := "Впишите его в .env как TELEGRAM_SUPPORT_CHAT_ID и перезапустите сервис."
+		if u.Message.Chat.ID == b.SupportChatID {
+			note = "Эта группа уже подключена как чат поддержки."
+		}
+		b.send(u.Message.Chat.ID, fmt.Sprintf("ID этой группы: <code>%d</code>\n%s", u.Message.Chat.ID, note), nil)
 	case u.Message != nil && b.SupportChatID != 0 && u.Message.Chat.ID == b.SupportChatID:
 		b.staffReply(ctx, u.Message)
 	}

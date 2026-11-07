@@ -7,7 +7,7 @@ import type { Me } from "../../lib/types";
 import { Button, Field, Input, Notice, Segmented } from "../../components/ui";
 import { OrLine, SocialButtons, SocialConsent } from "../../components/SocialLogin";
 import { Fingerprint } from "lucide-react";
-import { deviceHasPasskey, loginWithPasskey, passkeyError, passkeysSupported, usePasskey } from "../../lib/webauthn";
+import { passkeyError, passkeysSupported, usePasskey } from "../../lib/webauthn";
 
 function safeNext(n: string | null) {
   return n && n.startsWith("/") && !n.startsWith("//") ? n : "/app";
@@ -57,7 +57,8 @@ export function Login() {
   const [sms, setSms] = useState("");
   const [code, setCode] = useState("");
   const [mfa, setMfa] = useState(sp.get("step") === "2fa");
-  const [mfaWays, setMfaWays] = useState<{ totp: boolean; passkey: boolean }>({ totp: true, passkey: false });
+  const [mfaWays, setMfaWays] = useState<{ totp: boolean; passkey: boolean; telegram?: boolean; email?: boolean }>({ totp: true, passkey: false });
+  const [mfaSent, setMfaSent] = useState<null | { via: string; test_code?: string }>(null);
   const [keyBusy, setKeyBusy] = useState(false);
   const s = useSubmit();
   const phoneOn = !!config?.auth && config.auth.phone !== "off";
@@ -65,7 +66,15 @@ export function Login() {
     if (me?.user) nav(safeNext(sp.get("next")), { replace: true });
     if (me?.mfa_required) { setMfa(true); if (me.mfa) setMfaWays(me.mfa); }
   }, [me, nav, sp]);
+  // Chrome, Edge и Android предлагают сохранить пароль через Credential Management API; Safari и iOS — сами по отправке формы
+  const savePassword = () => {
+    try {
+      const PC = (window as any).PasswordCredential;
+      if (PC && how === "password" && email && password) navigator.credentials.store(new PC({ id: email, password, name: email }));
+    } catch { /* не поддерживается — не страшно */ }
+  };
   const finish = (r: Me | undefined) => {
+    if (r && (r.user || r.mfa_required)) savePassword();
     if (r?.mfa_required) { setMfa(true); if (r.mfa) setMfaWays(r.mfa); return; }
     if (r) setMe(r);
   };
@@ -83,10 +92,10 @@ export function Login() {
   const oauthErr = sp.get("oauth_error");
   return (
     <div className="auth-wrap">
-      <form className="auth-card sheet sheet-pad stack g16" onSubmit={onSubmit} noValidate>
+      <form className="auth-card sheet sheet-pad stack g16" method="post" action="/login" autoComplete="on" onSubmit={onSubmit} noValidate>
         <div>
           <h1>{mfa ? "Подтвердите вход" : "Вход"}</h1>
-          <p className="muted mt8">{mfa ? (mfaWays.totp ? "Введите 6 цифр из Google Authenticator или код восстановления" : "Подтвердите вход на этом устройстве") : "Рады видеть вас снова"}</p>
+          <p className="muted mt8">{mfa ? (mfaWays.totp ? "Введите 6 цифр из Google Authenticator или код восстановления" : "Подтвердите, что это вы: Face ID, отпечаток или код") : "Рады видеть вас снова"}</p>
         </div>
         {oauthErr && !mfa && <Notice kind={oauthErr === "cancel" ? "info" : "error"}>{OAUTH_ERRORS[oauthErr] || OAUTH_ERRORS.provider}</Notice>}
         {s.error && !s.field && <Notice kind="error">{s.error}</Notice>}
@@ -100,18 +109,30 @@ export function Login() {
             )}
             {mfaWays.totp && (
               <Field label="Код из Google Authenticator" error={s.fieldError("code")} htmlFor="code">
-                <Input id="code" inputMode="numeric" autoComplete="one-time-code" value={code} onChange={(e) => setCode(e.target.value)} autoFocus={!mfaWays.passkey} invalid={!!s.fieldError("code")} />
+                <Input id="code" name="one-time-code" inputMode="numeric" autoComplete="one-time-code" value={code} onChange={(e) => setCode(e.target.value)} autoFocus={!mfaWays.passkey} invalid={!!s.fieldError("code")} />
               </Field>
+            )}
+            {!mfaWays.totp && (mfaWays.telegram || mfaWays.email) && (
+              mfaSent ? (
+                <div className="stack g12 fade-in">
+                  <Field label={mfaSent.via === "telegram" ? "Код из Telegram" : "Код из письма"} error={s.fieldError("code")} htmlFor="code">
+                    <Input id="code" name="one-time-code" inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))} autoFocus invalid={!!s.fieldError("code")} />
+                  </Field>
+                  {mfaSent.test_code && <Notice kind="warn">Тестовый режим: код — <b className="num">{mfaSent.test_code}</b></Notice>}
+                </div>
+              ) : (
+                <div className="stack g8">
+                  <span className="small muted">Нет Face ID на этом устройстве? Пришлём код:</span>
+                  <div className="row g8 wrap">
+                    {mfaWays.telegram && <Button onClick={async () => { try { const r = await s.submit(() => api.post<{ via: string; test_code?: string }>("/auth/login/code", { via: "telegram" })); if (r) setMfaSent(r); } catch { /* */ } }}>В Telegram</Button>}
+                    {mfaWays.email && <Button onClick={async () => { try { const r = await s.submit(() => api.post<{ via: string; test_code?: string }>("/auth/login/code", { via: "email" })); if (r) setMfaSent(r); } catch { /* */ } }}>На почту</Button>}
+                  </div>
+                </div>
+              )
             )}
           </>
         ) : (
           <>
-            {passkeysSupported() && deviceHasPasskey() && (
-              <Button variant="primary" size="lg" block icon={<Fingerprint />} busy={keyBusy} onClick={async () => {
-                setKeyBusy(true); s.reset();
-                try { setMe(await loginWithPasskey()); } catch (e: any) { s.setError(passkeyError(e)); } finally { setKeyBusy(false); }
-              }}>Войти по Face ID или отпечатку</Button>
-            )}
             <SocialButtons next={sp.get("next") || undefined} />
             {config?.auth && (config.auth.google !== "off" || config.auth.apple !== "off") && <OrLine />}
             {phoneOn && (
@@ -120,21 +141,21 @@ export function Login() {
             {how === "password" ? (
               <div key="pw" className="stack g16 fade-in">
                 <Field label="Почта или телефон" htmlFor="email">
-                  <Input id="email" autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} required autoFocus placeholder="name@mail.by или +375 29 …" />
+                  <Input id="email" name="username" type="text" inputMode="email" autoComplete="username" autoCapitalize="none" autoCorrect="off" spellCheck={false} value={email} onChange={(e) => setEmail(e.target.value)} required autoFocus placeholder="name@mail.by или +375 29 …" />
                 </Field>
                 <Field label={<span className="row between">Пароль<Link to="/forgot-password" className="small">Забыли пароль?</Link></span>} htmlFor="password">
-                  <Input id="password" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required />
+                  <Input id="password" name="password" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required />
                 </Field>
               </div>
             ) : (
               <div key="ph" className="stack g16 fade-in">
                 <Field label="Номер телефона" error={s.fieldError("phone")} htmlFor="phone" hint={sent ? undefined : "Код придёт в Telegram. Номер подключается в профиле"}>
-                  <Input id="phone" type="tel" autoComplete="tel" placeholder="+375 (29) 123-45-67" value={phone} disabled={!!sent} onChange={(e) => setPhone(e.target.value ? formatPhone(e.target.value) : "")} invalid={!!s.fieldError("phone")} autoFocus />
+                  <Input id="phone" name="tel" type="tel" autoComplete="tel" placeholder="+375 (29) 123-45-67" value={phone} disabled={!!sent} onChange={(e) => setPhone(e.target.value ? formatPhone(e.target.value) : "")} invalid={!!s.fieldError("phone")} autoFocus />
                 </Field>
                 {sent && (
                   <>
                     <Field label="Код из Telegram" error={s.fieldError("code")} htmlFor="sms">
-                      <Input id="sms" inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={sms} onChange={(e) => setSms(e.target.value.replace(/\D/g, ""))} autoFocus invalid={!!s.fieldError("code")} />
+                      <Input id="sms" name="one-time-code" inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={sms} onChange={(e) => setSms(e.target.value.replace(/\D/g, ""))} autoFocus invalid={!!s.fieldError("code")} />
                     </Field>
                     {sent.test_code ? <Notice kind="warn">Тестовый Telegram: код — <b className="num">{sent.test_code}</b></Notice> : <Notice kind="info">Отправили код в Telegram, в чат с ботом AutoInvest.</Notice>}
                     <button type="button" className="link-btn small" onClick={() => { setSent(null); setSms(""); s.reset(); }}>Изменить номер или отправить код ещё раз</button>
@@ -144,7 +165,7 @@ export function Login() {
             )}
           </>
         )}
-        {(!mfa || mfaWays.totp) && <Button type="submit" variant={mfa && mfaWays.passkey ? "secondary" : "primary"} size="lg" block busy={s.busy}>{mfa ? "Подтвердить код" : how === "phone" && !sent ? "Получить код в Telegram" : "Войти"}</Button>}
+        {(!mfa || mfaWays.totp || mfaSent) && <Button type="submit" variant={mfa && mfaWays.passkey ? "secondary" : "primary"} size="lg" block busy={s.busy}>{mfa ? "Подтвердить код" : how === "phone" && !sent ? "Получить код в Telegram" : "Войти"}</Button>}
         {!mfa && <SocialConsent />}
         {!mfa && <p className="small muted" style={{ textAlign: "center" }}>Нет аккаунта? <Link to={"/register" + (sp.get("next") ? "?next=" + encodeURIComponent(sp.get("next")!) : "")}>Зарегистрироваться</Link></p>}
       </form>
@@ -190,7 +211,7 @@ export function Register() {
   const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement>) => setF({ ...f, [k]: e.target.type === "checkbox" ? e.target.checked : e.target.value });
   return (
     <div className="auth-wrap">
-      <form className="auth-card sheet sheet-pad stack g16" onSubmit={onSubmit} noValidate>
+      <form className="auth-card sheet sheet-pad stack g16" method="post" action="/register" autoComplete="on" onSubmit={onSubmit} noValidate>
         <div>
           <h1>{sent ? "Подтвердите почту" : "Регистрация"}</h1>
           <p className="muted mt8">Займёт минуту. Привязать карту и настроить копилку можно сразу после.</p>
@@ -200,7 +221,7 @@ export function Register() {
           <div className="stack g16 fade-in">
             <Notice kind="info">Отправили код на <b>{f.email}</b>. Введите его, чтобы закончить регистрацию.</Notice>
             <Field label="Код из письма" error={s.fieldError("code")} htmlFor="code">
-              <Input id="code" inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))} autoFocus invalid={!!s.fieldError("code")} />
+              <Input id="code" name="one-time-code" inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))} autoFocus invalid={!!s.fieldError("code")} />
             </Field>
             {sent.test_code && <Notice kind="warn">Тестовый режим: почта не настроена, код — <b className="num">{sent.test_code}</b></Notice>}
             {s.error && !s.field && <Notice kind="error">{s.error}</Notice>}
@@ -213,13 +234,13 @@ export function Register() {
         <OrLine />
         {s.error && !s.field && <Notice kind="error">{s.error}</Notice>}
         <Field label="Имя" error={s.fieldError("name")} htmlFor="name">
-          <Input id="name" autoComplete="given-name" value={f.name} onChange={set("name")} invalid={!!s.fieldError("name")} autoFocus />
+          <Input id="name" name="name" autoComplete="name" value={f.name} onChange={set("name")} invalid={!!s.fieldError("name")} autoFocus />
         </Field>
         <Field label="Почта" error={s.fieldError("email")} hint="Пришлём на неё код подтверждения" htmlFor="email">
-          <Input id="email" type="email" autoComplete="email" value={f.email} onChange={set("email")} invalid={!!s.fieldError("email")} />
+          <Input id="email" name="email" type="email" autoComplete="username" autoCapitalize="none" spellCheck={false} value={f.email} onChange={set("email")} invalid={!!s.fieldError("email")} />
         </Field>
         <Field label="Пароль" error={s.fieldError("password")} htmlFor="password" hint={f.password ? `Надёжность: ${label}` : "Не короче 8 символов, буквы и цифры"}>
-          <Input id="password" type="password" autoComplete="new-password" value={f.password} onChange={set("password")} invalid={!!s.fieldError("password")} />
+          <Input id="password" name="new-password" type="password" autoComplete="new-password" value={f.password} onChange={set("password")} invalid={!!s.fieldError("password")} />
           {f.password && <div className="bar" aria-hidden><span style={{ width: score * 25 + "%", background: score < 2 ? "var(--down)" : score < 3 ? "var(--warn)" : "var(--up)" }} /></div>}
         </Field>
         <div className="stack g12">
@@ -252,7 +273,7 @@ export function Forgot() {
           <>
             <p className="muted">Отправим ссылку для смены пароля на почту, указанную при регистрации.</p>
             {s.error && <Notice kind="error">{s.error}</Notice>}
-            <Field label="Почта" htmlFor="email"><Input id="email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} autoFocus required /></Field>
+            <Field label="Почта" htmlFor="email"><Input id="email" name="email" type="email" autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} autoFocus required /></Field>
             <Button type="submit" variant="primary" size="lg" block busy={s.busy}>Отправить ссылку</Button>
           </>
         )}
@@ -281,7 +302,7 @@ export function Reset() {
           <>
             {s.error && !s.field && <Notice kind="error">{s.error}</Notice>}
             <Field label="Новый пароль" error={s.fieldError("password")} hint="Не короче 8 символов, буквы и цифры" htmlFor="np">
-              <Input id="np" type="password" autoComplete="new-password" value={p} onChange={(e) => setP(e.target.value)} autoFocus />
+              <Input id="np" name="new-password" type="password" autoComplete="new-password" value={p} onChange={(e) => setP(e.target.value)} autoFocus />
             </Field>
             <Button type="submit" variant="primary" size="lg" block busy={s.busy}>Сохранить пароль</Button>
           </>

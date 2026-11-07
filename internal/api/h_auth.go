@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/mail"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -315,12 +316,20 @@ func (s *Server) login2FA(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	code := strings.TrimSpace(in.Code)
-	step, ok := auth.VerifyTOTPStep(u.TOTPSecret, code, time.Now(), u.TOTPLastStep)
-	if ok {
-		s.St.UpdateUserFields(r.Context(), u.ID, map[string]any{"totp_last_step": step})
-	}
-	if !ok && len(code) > 6 {
-		ok = s.useRecoveryCode(r, u, code)
+	ok := false
+	if u.TOTPEnabled {
+		step, good := auth.VerifyTOTPStep(u.TOTPSecret, code, time.Now(), u.TOTPLastStep)
+		if good {
+			s.St.UpdateUserFields(r.Context(), u.ID, map[string]any{"totp_last_step": step})
+		}
+		ok = good
+		if !ok && len(code) > 6 {
+			ok = s.useRecoveryCode(r, u, code)
+		}
+	} else if s.mfaMethods(r, u)["email"] {
+		// Face ID включён, но на этом устройстве ключа нет — код пришёл в Telegram или на почту
+		_, err := s.St.UsePhoneCode(r.Context(), "mfa:"+strconv.FormatInt(u.ID, 10), "login2fa", code)
+		ok = err == nil
 	}
 	if !ok {
 		writeFieldErr(w, "code", "Неверный код")

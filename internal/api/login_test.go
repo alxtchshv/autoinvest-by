@@ -148,29 +148,34 @@ func TestRegisterNeedsEmailCode(t *testing.T) {
 	}
 }
 
-func TestPasskeyLoginFlow(t *testing.T) {
-	srv, _ := newServer(t)
+func TestPasskeyUserFallbackCode(t *testing.T) {
+	srv, s := newServer(t)
 	c := newClient(t, srv.URL)
-	var b struct {
-		PublicKey struct {
-			Challenge string `json:"challenge"`
-			RPID      string `json:"rpId"`
-		} `json:"publicKey"`
-		Flow string `json:"flow"`
+	c.register("pk@test.by")
+	u, _ := s.St.UserByEmail(context.Background(), "pk@test.by")
+	s.St.AddPasskey(context.Background(), u.ID, "cred-1", "Mac · Safari", `{}`)
+	c2 := newClient(t, srv.URL)
+	var r struct {
+		MFARequired bool            `json:"mfa_required"`
+		MFA         map[string]bool `json:"mfa"`
 	}
-	if code := c.do("POST", "/api/v1/auth/passkey/begin", map[string]any{}, &b); code != 200 || b.Flow == "" || b.PublicKey.Challenge == "" || b.PublicKey.RPID != "test" {
-		t.Fatalf("begin: %d %+v", code, b)
+	c2.do("POST", "/api/v1/auth/login", map[string]any{"email": "pk@test.by", "password": "parol2026"}, &r)
+	if !r.MFARequired || !r.MFA["passkey"] || !r.MFA["email"] || r.MFA["totp"] || r.MFA["telegram"] {
+		t.Fatalf("методы: %+v", r)
 	}
-	// мусор вместо подписи не пускает, а flow одноразовый
-	if code := c.do("POST", "/api/v1/auth/passkey/finish?flow="+b.Flow, map[string]any{"id": "x", "type": "public-key"}, nil); code != 401 && code != 400 {
-		t.Fatalf("finish с мусором: %d", code)
+	var sent struct {
+		TestCode string `json:"test_code"`
 	}
-	if code := c.do("POST", "/api/v1/auth/passkey/finish?flow="+b.Flow, map[string]any{}, nil); code != 400 {
-		t.Fatalf("повтор flow: %d", code)
+	if code := c2.do("POST", "/api/v1/auth/login/code", map[string]any{"via": "telegram"}, nil); code != 400 {
+		t.Fatalf("telegram без привязки: %d", code)
 	}
-	var me struct{ User *store.User }
-	c.do("GET", "/api/v1/auth/me", nil, &me)
-	if me.User != nil {
-		t.Fatal("вошли без ключа")
+	if code := c2.do("POST", "/api/v1/auth/login/code", map[string]any{"via": "email"}, &sent); code != 200 || len(sent.TestCode) != 6 {
+		t.Fatalf("код на почту: %d %+v", code, sent)
+	}
+	if code := c2.do("POST", "/api/v1/auth/login/2fa", map[string]any{"code": "999999x"}, nil); code == 200 {
+		t.Fatal("неверный код принят")
+	}
+	if code := c2.do("POST", "/api/v1/auth/login/2fa", map[string]any{"code": sent.TestCode}, nil); code != 200 {
+		t.Fatalf("вход по коду: %d", code)
 	}
 }

@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { Fingerprint, X } from "lucide-react";
 import { useSession } from "../lib/session";
-import { addPasskey, deviceHasPasskey, deviceName, markDevicePasskey, passkeyError, passkeysSupported } from "../lib/webauthn";
+import { addPasskey, deviceHasPasskey, deviceName, markDevicePasskey, passkeyError, platformBiometrics } from "../lib/webauthn";
 import { Button, useToast } from "./ui";
 
 const KEY = "ai_pk_offer";
@@ -17,11 +17,15 @@ export function BiometricOffer() {
   const toast = useToast();
   const [show, setShow] = useState(false);
   const [busy, setBusy] = useState(false);
+  // предлагаем, только если на этом устройстве есть датчик (Face ID, Touch ID, отпечаток, Windows Hello)
+  // и ключа на нём ещё нет; если биометрия включена на другом устройстве — предлагаем добавить и это
   useEffect(() => {
-    if (!me?.user || !passkeysSupported() || deviceHasPasskey() || dismissedRecently()) return;
-    const t = setTimeout(() => setShow(true), 1500);
-    return () => clearTimeout(t);
+    if (!me?.user || deviceHasPasskey() || dismissedRecently()) return;
+    let alive = true, t = 0;
+    platformBiometrics().then((ok) => { if (ok && alive) t = window.setTimeout(() => setShow(true), 1500); });
+    return () => { alive = false; clearTimeout(t); };
   }, [me?.user]);
+  const elsewhere = (me?.passkeys || 0) > 0;
   if (!show) return null;
   const later = () => { try { localStorage.setItem(KEY, String(Date.now())); } catch { /* */ } setShow(false); };
   return (
@@ -29,8 +33,8 @@ export function BiometricOffer() {
       <button type="button" className="bio-x" aria-label="Закрыть" onClick={later}><X /></button>
       <span className="bio-ic"><Fingerprint /></span>
       <div className="stack g4">
-        <b>Входите по Face ID или отпечатку</b>
-        <span>Одно касание вместо кода из Telegram или письма — и мы точно знаем, что это вы.</span>
+        <b>{elsewhere ? "Включите Face ID и на этом устройстве" : "Подтверждайте вход по Face ID или отпечатку"}</b>
+        <span>{elsewhere ? "Сейчас на нём придётся ждать код. С биометрией — одно касание после пароля." : "После пароля — одно касание вместо кода из Telegram или письма. Так мы точно знаем, что это вы."}</span>
       </div>
       <div className="row g8">
         <Button variant="primary" size="sm" busy={busy} onClick={async () => {

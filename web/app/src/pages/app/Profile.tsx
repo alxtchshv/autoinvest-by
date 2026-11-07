@@ -352,9 +352,11 @@ function PasswordForm({ onDone }: { onDone?: () => void }) {
       } catch { /* */ }
     }}>
       {!hasPw && <Notice kind="info">Вы входите через Google или по телефону. Пароль нужен для вывода денег и как запасной способ входа.</Notice>}
-      {hasPw && <Field label="Текущий пароль" error={s.fieldError("current")}><Input type="password" autoComplete="current-password" value={pw.current} onChange={(e) => setPw({ ...pw, current: e.target.value })} /></Field>}
-      <Field label="Новый пароль" error={s.fieldError("new")} hint="Не короче 8 символов, буквы и цифры"><Input type="password" autoComplete="new-password" value={pw.next} onChange={(e) => setPw({ ...pw, next: e.target.value })} /></Field>
-      <Field label="Новый пароль ещё раз" error={mismatch ? "Пароли не совпадают" : undefined}><Input type="password" autoComplete="new-password" value={pw.again} onChange={(e) => setPw({ ...pw, again: e.target.value })} /></Field>
+      {/* скрытый логин — чтобы менеджер паролей понял, для какого аккаунта сохранить новый пароль */}
+      <input type="text" name="username" autoComplete="username" value={me?.user?.email || ""} readOnly hidden />
+      {hasPw && <Field label="Текущий пароль" error={s.fieldError("current")}><Input name="current-password" type="password" autoComplete="current-password" value={pw.current} onChange={(e) => setPw({ ...pw, current: e.target.value })} /></Field>}
+      <Field label="Новый пароль" error={s.fieldError("new")} hint="Не короче 8 символов, буквы и цифры"><Input name="new-password" type="password" autoComplete="new-password" value={pw.next} onChange={(e) => setPw({ ...pw, next: e.target.value })} /></Field>
+      <Field label="Новый пароль ещё раз" error={mismatch ? "Пароли не совпадают" : undefined}><Input name="confirm-password" type="password" autoComplete="new-password" value={pw.again} onChange={(e) => setPw({ ...pw, again: e.target.value })} /></Field>
       {totp && <Field label="Код из Google Authenticator" error={s.fieldError("code")}><Input inputMode="numeric" autoComplete="one-time-code" maxLength={12} value={pw.code} onChange={(e) => setPw({ ...pw, code: e.target.value.replace(/\s/g, "") })} /></Field>}
       {s.error && !s.field && <Notice kind="error">{s.error}</Notice>}
       {hasPw && <p className="small muted" style={{ margin: 0 }}>После смены пароля все другие устройства выйдут из аккаунта.</p>}
@@ -467,9 +469,9 @@ function PasskeysSection() {
   const list = d.data?.passkeys || [];
   return (
     <section className="sheet">
-      <div className="sheet-head"><h2>Вход по Face ID или отпечатку</h2>{list.length ? <span className="badge badge-up">Включено</span> : <span className="badge">Выключено</span>}</div>
+      <div className="sheet-head"><h2>Face ID или отпечаток вместо кода</h2>{list.length ? <span className="badge badge-up">Включено</span> : <span className="badge">Выключено</span>}</div>
       <div className="sheet-body stack g12">
-        <span className="muted">Одно касание вместо кода из Telegram или письма и вместо пароля при выводе денег. Так мы уверены, что это именно вы. Биометрия остаётся на устройстве — мы храним только ключ.</span>
+        <span className="muted">После логина и пароля — одно касание вместо кода из Telegram или письма; перед выводом денег — вместо пароля. Так мы уверены, что это именно вы. Биометрия остаётся на устройстве — мы храним только ключ.</span>
         {list.length > 0 && (
           <div className="list pk-list">
             {list.map((k) => (
@@ -496,7 +498,7 @@ function Disable2FA({ open, onClose, onDone }: { open: boolean; onClose: () => v
   return (
     <Modal open={open} onClose={onClose} title="Отключить двухфакторную защиту">
       <form className="stack g16" onSubmit={async (e) => { e.preventDefault(); try { await s.submit(() => api.post("/me/2fa/disable", { password: p, code: c })); onDone(); } catch { /* */ } }}>
-        <Field label="Пароль" error={s.fieldError("password")}><Input type="password" value={p} onChange={(e) => setP(e.target.value)} /></Field>
+        <Field label="Пароль" error={s.fieldError("password")}><Input name="password" type="password" autoComplete="current-password" value={p} onChange={(e) => setP(e.target.value)} /></Field>
         <Field label="Код из приложения или код восстановления" error={s.fieldError("code")}><Input value={c} onChange={(e) => setC(e.target.value)} /></Field>
         <div className="row g8" style={{ justifyContent: "flex-end" }}><Button onClick={onClose}>Отмена</Button><Button type="submit" variant="danger" busy={s.busy}>Отключить</Button></div>
       </form>

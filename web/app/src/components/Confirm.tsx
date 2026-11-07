@@ -27,7 +27,7 @@ export function useConfirm() {
     <div className="stack g12">
       {hasPw && (
         <Field label="Пароль от аккаунта" error={fieldError("password")} hint={hint}>
-          <Input type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} />
+          <Input name="password" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} />
         </Field>
       )}
       {totp && (

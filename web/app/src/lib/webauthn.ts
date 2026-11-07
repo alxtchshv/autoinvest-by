@@ -57,21 +57,9 @@ const PK_FLAG = "ai_pk";
 export const deviceHasPasskey = () => { try { return localStorage.getItem(PK_FLAG) === "1"; } catch { return false; } };
 export const markDevicePasskey = (on = true) => { try { on ? localStorage.setItem(PK_FLAG, "1") : localStorage.removeItem(PK_FLAG); } catch { /* */ } };
 
-/** Вход одним касанием: без почты, пароля и кода. */
-export async function loginWithPasskey() {
-  const opts = await api.post<{ publicKey: any; flow: string }>("/auth/passkey/begin");
-  const pk = opts.publicKey;
-  pk.challenge = b64(pk.challenge);
-  pk.allowCredentials = (pk.allowCredentials || []).map((c: any) => ({ ...c, id: b64(c.id) }));
-  const cred = (await navigator.credentials.get({ publicKey: pk })) as PublicKeyCredential;
-  const r = cred.response as AuthenticatorAssertionResponse;
-  const body = {
-    id: cred.id, rawId: ub64(cred.rawId), type: cred.type,
-    response: { clientDataJSON: ub64(r.clientDataJSON), authenticatorData: ub64(r.authenticatorData), signature: ub64(r.signature), userHandle: ub64(r.userHandle) },
-  };
-  const me = await api.post<any>(`/auth/passkey/finish?flow=${encodeURIComponent(opts.flow)}`, body);
-  markDevicePasskey();
-  return me;
+/** Есть ли на устройстве встроенная биометрия (Face ID, Touch ID, отпечаток, Windows Hello). */
+export async function platformBiometrics() {
+  try { return passkeysSupported() && await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable(); } catch { return false; }
 }
 
 /** Понятный текст ошибки браузера (отмена, нет датчика и т. п.). */

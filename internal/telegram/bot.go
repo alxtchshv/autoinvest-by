@@ -167,6 +167,9 @@ func (b *Bot) Check(ctx context.Context) error {
 	if b.Username == "" {
 		b.Username = me.Username
 	}
+	// профиль бота: описание в пустом чате и короткое «о боте» (аватарку Telegram разрешает ставить только через @BotFather)
+	b.call(ctx, "setMyDescription", map[string]any{"description": botDescription, "language_code": ""}, nil)
+	b.call(ctx, "setMyShortDescription", map[string]any{"short_description": botAbout, "language_code": ""}, nil)
 	b.call(ctx, "setMyCommands", map[string]any{"commands": []map[string]string{
 		{"command": "menu", "description": "Главное меню"},
 		{"command": "balance", "description": "Баланс и доходность"},
@@ -178,6 +181,16 @@ func (b *Bot) Check(ctx context.Context) error {
 	}}, nil)
 	return nil
 }
+
+const botAbout = "Копилки AutoInvest в Telegram: баланс, чеки о пополнениях, пауза одной кнопкой и коды для входа."
+
+const botDescription = "Бот сервиса AutoInvest — регулярные накопления в долларе, золоте и криптовалюте.\n\n" +
+	"• Баланс и доходность всех копилок\n" +
+	"• Чек о каждом пополнении и выводе\n" +
+	"• Пауза и включение копилки одной кнопкой\n" +
+	"• Коды для входа по номеру телефона\n" +
+	"• Вопрос в поддержку прямо из чата\n\n" +
+	"Чтобы начать, откройте на сайте Профиль → Уведомления → «Подключить Telegram»."
 
 // ---------------------------------------------------------------- приём апдейтов
 

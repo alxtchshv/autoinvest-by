@@ -3,11 +3,11 @@ package api
 import (
 	"context"
 	"fmt"
-	"time"
 	"net/http"
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	"autoinvest/internal/auth"
 	"autoinvest/internal/store"

@@ -1,4 +1,5 @@
 import { Suspense, useEffect, useRef, useState, type ReactNode } from "react";
+import { BiometricOffer } from "./BiometricOffer";
 import { Link, NavLink, Navigate, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { Menu, X, PanelLeftClose, PanelLeftOpen, Bell, ChartCandlestick, CreditCard, Eye, EyeOff, History, House, LifeBuoy, PiggyBank, Calculator, Shield, LogOut, User } from "lucide-react";
 import { api } from "../lib/api";
@@ -82,6 +83,7 @@ export function AppShell() {
           <ModeBanner />
           <TopBar />
           <main className="content" id="main">
+            <BiometricOffer />
             <Suspense fallback={<PageLoader />}><Outlet /></Suspense>
           </main>
         </div>
@@ -194,7 +196,7 @@ export function PublicLayout() {
   }, []);
   useEffect(() => setMenu(false), [loc.pathname]);
   const links = (close?: () => void) => SITE_LINKS.map(([id, label]) => id === "calc"
-    ? <Link key={id} to="/calculator" onClick={close}>{label}</Link>
+    ? <NavLink key={id} to="/calculator" onClick={() => { close?.(); window.scrollTo({ top: 0, behavior: "smooth" }); }}>{label}</NavLink>
     : <SectionLink key={id} id={id} onClick={close}>{label}</SectionLink>);
   return (
     <MarketProvider userId={null}>
@@ -221,7 +223,8 @@ export function PublicLayout() {
           </div>
         </div>
       </header>
-      <Suspense fallback={<PageLoader />}><Outlet /></Suspense>
+      {/* смена страницы — мягкое появление, как прокрутка к разделам */}
+      <div key={loc.pathname} className="page-in"><Suspense fallback={<PageLoader />}><Outlet /></Suspense></div>
       <SiteFooter />
     </MarketProvider>
   );
@@ -241,7 +244,7 @@ function SiteFooter() {
             <h4>Сервис</h4>
             <SectionLink id="how">Как это работает</SectionLink>
             <SectionLink id="strategies">Планы</SectionLink>
-            <Link to="/calculator">Калькулятор</Link>
+            <NavLink to="/calculator">Калькулятор</NavLink>
             <SectionLink id="pricing">Тарифы</SectionLink>
           </div>
           <div>

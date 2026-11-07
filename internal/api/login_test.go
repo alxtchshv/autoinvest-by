@@ -147,3 +147,30 @@ func TestRegisterNeedsEmailCode(t *testing.T) {
 		t.Fatalf("повторная регистрация той же почты: %d", code)
 	}
 }
+
+func TestPasskeyLoginFlow(t *testing.T) {
+	srv, _ := newServer(t)
+	c := newClient(t, srv.URL)
+	var b struct {
+		PublicKey struct {
+			Challenge string `json:"challenge"`
+			RPID      string `json:"rpId"`
+		} `json:"publicKey"`
+		Flow string `json:"flow"`
+	}
+	if code := c.do("POST", "/api/v1/auth/passkey/begin", map[string]any{}, &b); code != 200 || b.Flow == "" || b.PublicKey.Challenge == "" || b.PublicKey.RPID != "test" {
+		t.Fatalf("begin: %d %+v", code, b)
+	}
+	// мусор вместо подписи не пускает, а flow одноразовый
+	if code := c.do("POST", "/api/v1/auth/passkey/finish?flow="+b.Flow, map[string]any{"id": "x", "type": "public-key"}, nil); code != 401 && code != 400 {
+		t.Fatalf("finish с мусором: %d", code)
+	}
+	if code := c.do("POST", "/api/v1/auth/passkey/finish?flow="+b.Flow, map[string]any{}, nil); code != 400 {
+		t.Fatalf("повтор flow: %d", code)
+	}
+	var me struct{ User *store.User }
+	c.do("GET", "/api/v1/auth/me", nil, &me)
+	if me.User != nil {
+		t.Fatal("вошли без ключа")
+	}
+}

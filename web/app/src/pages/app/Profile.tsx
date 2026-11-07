@@ -467,9 +467,9 @@ function PasskeysSection() {
   const list = d.data?.passkeys || [];
   return (
     <section className="sheet">
-      <div className="sheet-head"><h2>Face ID, Touch ID или отпечаток</h2>{list.length ? <span className="badge badge-up">Включено</span> : <span className="badge">Выключено</span>}</div>
+      <div className="sheet-head"><h2>Вход по Face ID или отпечатку</h2>{list.length ? <span className="badge badge-up">Включено</span> : <span className="badge">Выключено</span>}</div>
       <div className="sheet-body stack g12">
-        <span className="muted">Подтверждайте вход и вывод денег касанием — как в банковском приложении. Биометрия остаётся на устройстве, мы храним только ключ.</span>
+        <span className="muted">Одно касание вместо кода из Telegram или письма и вместо пароля при выводе денег. Так мы уверены, что это именно вы. Биометрия остаётся на устройстве — мы храним только ключ.</span>
         {list.length > 0 && (
           <div className="list pk-list">
             {list.map((k) => (

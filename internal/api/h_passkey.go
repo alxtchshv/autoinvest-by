@@ -101,7 +101,7 @@ func (s *Server) passkeyRegisterBegin(w http.ResponseWriter, r *http.Request) {
 	}
 	opts, sd, err := wa.BeginRegistration(wu,
 		webauthn.WithExclusions(excl),
-		webauthn.WithAuthenticatorSelection(protocol.AuthenticatorSelection{ResidentKey: protocol.ResidentKeyRequirementPreferred, UserVerification: protocol.VerificationRequired}))
+		webauthn.WithAuthenticatorSelection(protocol.AuthenticatorSelection{ResidentKey: protocol.ResidentKeyRequirementRequired, UserVerification: protocol.VerificationRequired}))
 	if err != nil {
 		s.internal(w, r, err)
 		return
@@ -246,6 +246,83 @@ func (s *Server) loginPasskeyFinish(w http.ResponseWriter, r *http.Request) {
 	s.St.CompleteMFA(r.Context(), sess.ID)
 	s.afterLogin(r, u)
 	writeJSON(w, 200, s.mePayload(r, u))
+}
+
+// ---------------------------------------------------------------- вход одним касанием
+
+// Вход по Face ID / отпечатку без почты и кода: браузер сам предлагает ключ этого сайта (discoverable credential),
+// по нему находим пользователя. Ключ = устройство + биометрия, поэтому второй шаг не нужен.
+func (s *Server) passkeyLoginBegin(w http.ResponseWriter, r *http.Request) {
+	if !s.limiter.Allow("pk-login:"+clientIP(r), 30, 15*time.Minute) {
+		writeErr(w, http.StatusTooManyRequests, "Слишком много попыток. Подождите 15 минут")
+		return
+	}
+	wa, err := s.webAuthn()
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	opts, sd, err := wa.BeginDiscoverableLogin(webauthn.WithUserVerification(protocol.VerificationRequired))
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	flow := strings.ToLower(auth.RandomCode(24, ""))
+	raw, _ := json.Marshal(sd)
+	s.St.SetKV(r.Context(), "wa:disc:"+flow, string(raw))
+	writeJSON(w, 200, map[string]any{"publicKey": opts.Response, "flow": flow})
+}
+
+func (s *Server) passkeyLoginFinish(w http.ResponseWriter, r *http.Request) {
+	flow := r.URL.Query().Get("flow")
+	if flow == "" || len(flow) > 64 {
+		writeErr(w, http.StatusBadRequest, "Начните вход заново")
+		return
+	}
+	key := "wa:disc:" + flow
+	raw := s.St.GetKV(r.Context(), key)
+	s.St.SetKV(r.Context(), key, "")
+	var sd webauthn.SessionData
+	if raw == "" || json.Unmarshal([]byte(raw), &sd) != nil || (!sd.Expires.IsZero() && time.Now().After(sd.Expires)) {
+		writeErr(w, http.StatusBadRequest, "Время входа истекло, попробуйте ещё раз")
+		return
+	}
+	wa, err := s.webAuthn()
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	var found *store.User
+	cred, err := wa.FinishDiscoverableLogin(func(_, userHandle []byte) (webauthn.User, error) {
+		id, err := strconv.ParseInt(strings.TrimPrefix(string(userHandle), "autoinvest-user-"), 10, 64)
+		if err != nil || !strings.HasPrefix(string(userHandle), "autoinvest-user-") {
+			return nil, errors.New("чужой ключ")
+		}
+		u, err := s.St.UserByID(r.Context(), id)
+		if err != nil {
+			return nil, err
+		}
+		found = u
+		wu, _ := s.loadWAUser(r, u)
+		return wu, nil
+	}, sd, r)
+	if err != nil || found == nil {
+		s.Log.Warn("passkey discoverable login", "err", err)
+		writeErr(w, http.StatusUnauthorized, "Этот ключ не подходит. Войдите по почте или коду и добавьте устройство заново")
+		return
+	}
+	if found.Status == "blocked" || found.Status == "deleted" {
+		writeErr(w, http.StatusForbidden, "Аккаунт заблокирован. Напишите в поддержку: support@autoinvest.by")
+		return
+	}
+	craw, _ := json.Marshal(cred)
+	s.St.UpdatePasskeyUse(r.Context(), found.ID, base64.RawURLEncoding.EncodeToString(cred.ID), string(craw))
+	if err := s.setSession(w, r, found, false); err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	s.afterLogin(r, found)
+	writeJSON(w, 200, s.mePayload(r, found))
 }
 
 // Подтверждение опасного действия ключом: на 5 минут вместо пароля и кода.

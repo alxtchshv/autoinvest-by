@@ -564,3 +564,10 @@
 .tg-replykb { display: flex; gap: 6px; padding: 8px 12px 0; background: #fff; border-top: 1px solid var(--line); }
 .tg-replykb button { flex: 1; height: 42px; border: 0; border-radius: 10px; background: var(--line-2); font: inherit; font-weight: 560; cursor: pointer; animation: tgIn .2s ease-out; }
 .tg-replykb button:hover { background: #e3e6ec; }
+
+/* «Будущие пополнения»: заголовок и кнопка всегда в одну строку; на узкой карточке — только карандаш */
+.pd-side { container-type: inline-size; }
+.pd-side > .sheet-head { flex-wrap: nowrap; gap: 8px; }
+.pd-side > .sheet-head h2 { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.pd-side > .sheet-head .btn { flex: none; }
+@container (max-width: 380px) { .pd-edit-label { display: none; } }

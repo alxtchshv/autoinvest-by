@@ -342,3 +342,14 @@ button.list-row { width: 100%; border-left: 0; border-right: 0; border-bottom: 0
 .pp-mix li span { flex: 1; min-width: 0; color: var(--ink); }
 .pp-mix li b { color: var(--ink); font-variant-numeric: tabular-nums; }
 .pp-mix .asset-ico.sm { width: 22px; height: 22px; }
+
+/* ---------- предложение включить Face ID ---------- */
+.bio-offer { position: fixed; z-index: 150; right: 24px; bottom: 24px; width: min(380px, calc(100vw - 32px)); display: flex; flex-direction: column; gap: 12px; padding: 18px; background: var(--surface); border: 1px solid var(--line); border-radius: 18px; box-shadow: var(--shadow-pop); animation: bioIn .45s cubic-bezier(.2, .9, .3, 1.1); font-size: 14px; color: var(--ink-2); }
+.bio-offer b { font-size: 16px; color: var(--ink); }
+.bio-ic { width: 44px; height: 44px; border-radius: 14px; background: var(--brand-soft); color: var(--brand); display: grid; place-items: center; }
+.bio-ic svg { width: 24px; height: 24px; }
+.bio-x { position: absolute; top: 10px; right: 10px; width: 30px; height: 30px; border: 0; background: none; border-radius: 8px; color: var(--faint); cursor: pointer; display: grid; place-items: center; }
+.bio-x:hover { background: var(--line-2); color: var(--ink); }
+.bio-x svg { width: 16px; height: 16px; }
+@keyframes bioIn { from { opacity: 0; transform: translateY(20px) scale(.97); } }
+@media (max-width: 860px) { .bio-offer { right: 16px; bottom: 84px; } }

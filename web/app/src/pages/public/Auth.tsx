@@ -7,7 +7,7 @@ import type { Me } from "../../lib/types";
 import { Button, Field, Input, Notice, Segmented } from "../../components/ui";
 import { OrLine, SocialButtons, SocialConsent } from "../../components/SocialLogin";
 import { Fingerprint } from "lucide-react";
-import { passkeyError, passkeysSupported, usePasskey } from "../../lib/webauthn";
+import { deviceHasPasskey, loginWithPasskey, passkeyError, passkeysSupported, usePasskey } from "../../lib/webauthn";
 
 function safeNext(n: string | null) {
   return n && n.startsWith("/") && !n.startsWith("//") ? n : "/app";
@@ -106,6 +106,12 @@ export function Login() {
           </>
         ) : (
           <>
+            {passkeysSupported() && deviceHasPasskey() && (
+              <Button variant="primary" size="lg" block icon={<Fingerprint />} busy={keyBusy} onClick={async () => {
+                setKeyBusy(true); s.reset();
+                try { setMe(await loginWithPasskey()); } catch (e: any) { s.setError(passkeyError(e)); } finally { setKeyBusy(false); }
+              }}>Войти по Face ID или отпечатку</Button>
+            )}
             <SocialButtons next={sp.get("next") || undefined} />
             {config?.auth && (config.auth.google !== "off" || config.auth.apple !== "off") && <OrLine />}
             {phoneOn && (
@@ -122,7 +128,7 @@ export function Login() {
               </div>
             ) : (
               <div key="ph" className="stack g16 fade-in">
-                <Field label="Номер телефона" error={s.fieldError("phone")} htmlFor="phone" hint={sent ? undefined : "Код придёт в Telegram — это бесплатно и быстрее SMS. Номер подключается в профиле"}>
+                <Field label="Номер телефона" error={s.fieldError("phone")} htmlFor="phone" hint={sent ? undefined : "Код придёт в Telegram. Номер подключается в профиле"}>
                   <Input id="phone" type="tel" autoComplete="tel" placeholder="+375 (29) 123-45-67" value={phone} disabled={!!sent} onChange={(e) => setPhone(e.target.value ? formatPhone(e.target.value) : "")} invalid={!!s.fieldError("phone")} autoFocus />
                 </Field>
                 {sent && (

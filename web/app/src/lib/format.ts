@@ -144,3 +144,9 @@ export function parseKop(s: string): number {
 
 /** Готовые наборы активов везде называем «План «Баланс»», чтобы «Доллар» как план не путали с валютой. */
 export const planName = (name: string) => `План «${name}»`;
+
+/** +375291234567 → +375 (29) 123-45-67 */
+export function phoneFmt(p: string) {
+  const m = /^\+375(\d{2})(\d{3})(\d{2})(\d{2})$/.exec(p);
+  return m ? `+375 (${m[1]}) ${m[2]}-${m[3]}-${m[4]}` : p;
+}

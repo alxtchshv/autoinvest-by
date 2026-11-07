@@ -3,7 +3,7 @@ import { Link, NavLink, useNavigate, useParams, useSearchParams } from "react-ro
 import QRCode from "qrcode";
 import { ChevronRight, Copy, Download, KeyRound, LogOut, Mail, Monitor, Smartphone } from "lucide-react";
 import { api } from "../../lib/api";
-import { ago, byn, date, dateTime } from "../../lib/format";
+import { ago, byn, date, dateTime, phoneFmt } from "../../lib/format";
 import { useLoad, useSubmit, useTitle } from "../../lib/hooks";
 import { useSession } from "../../lib/session";
 import type { AuditEvent, Consent, KYC, Me, Payment, Session } from "../../lib/types";
@@ -395,7 +395,7 @@ function LoginMethods() {
       <div className="list">
         <Row icon={<Mail />} title="Почта и пароль" sub={x.has_password ? "Пароль задан" : "Пароль не задан"} action={<Link className="btn btn-secondary btn-sm" to="/app/profile/password">{x.has_password ? "Сменить" : "Задать"}</Link>} />
         {x.providers.phone !== "off" && (
-          <Row icon={<Smartphone />} title="Телефон и код" sub={x.phone_verified ? `${x.phone} · подтверждён` : x.phone ? `${x.phone} · не подтверждён` : "Номер не указан"}
+          <Row icon={<Smartphone />} title="Телефон и код" sub={x.phone_verified ? `${phoneFmt(x.phone)} · подтверждён` : x.phone ? `${phoneFmt(x.phone)} · не подтверждён` : "Номер не указан"}
             action={<Button size="sm" variant={x.phone_verified ? "secondary" : "primary"} onClick={() => setPhoneOpen(true)}>{x.phone_verified ? "Сменить" : "Подтвердить"}</Button>} />
         )}
         {(["google", "apple"] as const).filter((p) => x.providers[p] !== "off").map((p) => {
@@ -416,7 +416,7 @@ function PhoneModal({ open, initial, onClose, onDone }: { open: boolean; initial
   const [sent, setSent] = useState<null | { test_code?: string; via?: string }>(null);
   const [code, setCode] = useState("");
   const s = useSubmit();
-  useEffect(() => { if (open) { setPhone(initial); setSent(null); setCode(""); s.reset(); } /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [open]);
+  useEffect(() => { if (open) { setPhone(phoneFmt(initial)); setSent(null); setCode(""); s.reset(); } /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [open]);
   return (
     <Modal open={open} onClose={onClose} title="Подтверждение номера">
       <form className="stack g16" onSubmit={async (e) => {

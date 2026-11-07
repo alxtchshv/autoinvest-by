@@ -579,3 +579,12 @@
 .tg-log-row.out { align-self: flex-start; }
 .tg-log-bubble { padding: 7px 11px; border-radius: 12px; background: #fff; font-size: 14px; line-height: 19px; white-space: pre-wrap; word-break: break-word; }
 .tg-log-row.in .tg-log-bubble { background: #dcf3c8; }
+
+/* ---------- админка: выгрузки файлами ---------- */
+.export-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+@media (max-width: 720px) { .export-grid { grid-template-columns: 1fr; } }
+.export-tile { display: flex; flex-direction: column; gap: 4px; padding: 14px; border: 1px solid var(--line); border-radius: 12px; color: var(--ink); transition: border-color .15s, box-shadow .15s, transform .15s; }
+.export-tile:hover { color: var(--ink); border-color: var(--brand); box-shadow: 0 6px 18px -12px rgba(35, 64, 216, .5); transform: translateY(-1px); }
+.export-tile svg { width: 20px; height: 20px; color: var(--brand); margin-bottom: 4px; }
+.export-tile span { font-size: 13px; color: var(--muted); }
+.admin-ticket { max-width: 820px; width: 100%; margin: 0 auto; }

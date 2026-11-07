@@ -1,6 +1,7 @@
+import { DatePicker } from "../../components/DatePicker";
 import { Suspense, useState } from "react";
 import { Link, NavLink, Outlet, useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { ArrowLeft, Gauge, IdCard, LayoutDashboard, ListOrdered, MessageSquare, Search, Users, House } from "lucide-react";
+import { ArrowLeft, Download, Gauge, IdCard, LayoutDashboard, ListOrdered, MessageSquare, Search, Users, House } from "lucide-react";
 import { api } from "../../lib/api";
 import { ago, byn, dateNum, dateTime, kop } from "../../lib/format";
 import { useLoad, useSubmit, useTitle } from "../../lib/hooks";
@@ -9,6 +10,8 @@ import type { Card, KYC, Order, Plan, Ticket, User } from "../../lib/types";
 import { Button, Empty, Field, Input, LoadError, Logo, Modal, Money, Notice, OrderStatus, PageLoader, PlanStatus, Segmented, useToast } from "../../components/ui";
 import { ModeBanner } from "../../components/layout";
 import { ChatView } from "../app/Support";
+
+const SOURCE_NAMES: Record<string, string> = { nbrb: "Курсы НБРБ", binance: "Binance", bybit: "Bybit", coingecko: "CoinGecko", yahoo: "Yahoo Finance (акции США)" };
 
 export function AdminLayout() {
   const { me } = useSession();
@@ -245,8 +248,15 @@ export function AdminUser() {
             )}
           </section>
           <section className="sheet">
-            <div className="sheet-head"><h2>Последние операции</h2></div>
-            <AdminOrdersTable orders={d.orders} onChange={reload} />
+            <div className="sheet-head"><h2>Данные пользователя</h2></div>
+            <div className="sheet-body stack g12">
+              <span className="muted">Операции, переписку и журнал скачивайте файлом — открываются в Excel. Каждая выгрузка записывается в журнал пользователя.</span>
+              <div className="export-grid">
+                <a className="export-tile" href={`/api/v1/admin/users/${u.id}/export/operations`} download><Download /><b>Операции</b><span>{d.orders.length ? `${d.orders.length}${d.orders.length >= 50 ? "+" : ""} шт.` : "пока нет"}</span></a>
+                <a className="export-tile" href={`/api/v1/admin/users/${u.id}/export/telegram`} download><Download /><b>Переписка в Telegram</b><span>{d.telegram.length ? `${d.telegram.length}${d.telegram.length >= 300 ? "+" : ""} сообщ.` : "нет сообщений"}</span></a>
+                <a className="export-tile" href={`/api/v1/admin/users/${u.id}/export/audit`} download><Download /><b>Журнал действий</b><span>входы, карты, копилки, выводы</span></a>
+              </div>
+            </div>
           </section>
         </div>
         <div className="stack g16">
@@ -264,20 +274,6 @@ export function AdminUser() {
             {isAdmin && <div className="row g8 mt16"><Input style={{ width: 90, height: 34 }} value={days} onChange={(e) => setDays(e.target.value)} aria-label="Дней Pro" /><Button size="sm" onClick={() => act("pro", { days: Number(days) }, "Pro продлён")}>Выдать Pro (дней)</Button></div>}
           </div></section>
           {d.tickets.length > 0 && <section className="sheet"><div className="sheet-head"><h2>Обращения</h2></div><div className="list">{d.tickets.map((t) => <Link key={t.id} to={`/admin/tickets/${t.id}`} className="list-row"><div className="grow"><div className="title">{t.subject}</div><div className="sub">{ago(t.updated_at)}</div></div><span className="badge">{t.status}</span></Link>)}</div></section>}
-          <section className="sheet">
-            <div className="sheet-head"><h2>Переписка в Telegram</h2><span className="small muted">{d.telegram.length ? `последние ${d.telegram.length}` : "нет сообщений"}</span></div>
-            {d.telegram.length > 0 && (
-              <div className="tg-log">
-                {[...d.telegram].reverse().map((m) => (
-                  <div key={m.id} className={`tg-log-row ${m.dir}`}>
-                    <div className="tg-log-bubble">{m.text || "—"}</div>
-                    <div className="tiny muted">{m.dir === "in" ? "клиент" : "бот"} · {dateTime(m.created_at)}{m.kind === "error" ? " · не доставлено" : ""}</div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </section>
-          <section className="sheet"><div className="sheet-head"><h2>Журнал</h2></div><div className="table-wrap"><table className="table"><tbody>{d.audit.slice(0, 25).map((a, i) => <tr key={i}><td className="small">{a.action}<div className="tiny muted">{a.details}</div></td><td className="small muted r nowrap">{dateTime(a.created_at)}</td></tr>)}</tbody></table></div></section>
         </div>
       </div>
     </div>
@@ -312,23 +308,35 @@ function AdminOrdersTable({ orders, onChange }: { orders: Order[]; onChange: () 
   );
 }
 
+// На экране — только то, что требует действия сотрудника; полная история — файлом за период.
 export function AdminOrders() {
   useTitle("Операции");
   const [sp, setSp] = useSearchParams();
-  const status = sp.get("status") || "";
+  const status = sp.get("status") || "payout_pending";
   const [page, setPage] = useState(1);
-  const { data, error, loading, reload } = useLoad(() => api.get<{ orders: Order[]; total: number; per: number }>(`/admin/orders?page=${page}${status ? "&status=" + status : ""}`), [status, page]);
+  const [period, setPeriod] = useState({ from: "", to: "", status: "" });
+  const { data, error, loading, reload } = useLoad(() => api.get<{ orders: Order[]; total: number; per: number }>(`/admin/orders?page=${page}&status=${status}`), [status, page]);
+  const qs = new URLSearchParams(Object.entries(period).filter(([, v]) => v)).toString();
+  const today = new Date().toISOString().slice(0, 10);
   return (
-    <div>
-      <div className="page-head"><div><h1>Операции</h1>{data && <p>Найдено {data.total}</p>}</div></div>
-      <div style={{ marginBottom: 16 }}>
-        <Segmented label="Статус" value={status} onChange={(v) => { setPage(1); setSp(v ? { status: v } : {}); }} options={[
-          { value: "", label: "Все" }, { value: "filled", label: "Исполнены" }, { value: "pending", label: "В обработке" }, { value: "payout_pending", label: "Ручные выплаты" }, { value: "manual", label: "На проверке" }, { value: "failed", label: "Отклонены" },
-        ]} />
-      </div>
+    <div className="stack g16">
+      <div className="page-head" style={{ marginBottom: 0 }}><div><h1>Операции</h1><p>Здесь — только то, что ждёт действия. Всю историю удобнее смотреть в Excel.</p></div></div>
+      <section className="sheet sheet-pad">
+        <div className="row wrap g12" style={{ alignItems: "flex-end" }}>
+          <div className="stack g4 small export-date"><span className="muted">С</span><DatePicker value={period.from} min="2020-01-01" max={period.to || today} onChange={(v) => setPeriod({ ...period, from: v })} placeholder="С начала" /></div>
+          <div className="stack g4 small export-date"><span className="muted">По</span><DatePicker value={period.to} min={period.from || "2020-01-01"} max={today} onChange={(v) => setPeriod({ ...period, to: v })} placeholder="По сегодня" /></div>
+          <select className="select" style={{ width: 200 }} value={period.status} onChange={(e) => setPeriod({ ...period, status: e.target.value })} aria-label="Статус">
+            <option value="">Все статусы</option><option value="filled">Исполненные</option><option value="failed">Отклонённые</option><option value="payout_pending">Ручные выплаты</option><option value="manual">На проверке</option>
+          </select>
+          <a className="btn btn-primary" href={`/api/v1/admin/orders/export.csv${qs ? "?" + qs : ""}`} download><Download />Скачать операции</a>
+        </div>
+      </section>
+      <Segmented label="Требуют действия" value={status} onChange={(v) => { setPage(1); setSp({ status: v }); }} options={[
+        { value: "payout_pending", label: "Ручные выплаты" }, { value: "manual", label: "На проверке" }, { value: "pending", label: "Зависли в обработке" }, { value: "failed", label: "Отклонены" },
+      ]} />
       {loading && !data ? <PageLoader /> : error ? <LoadError error={error} retry={reload} /> : (
         <div className="sheet">
-          <AdminOrdersTable orders={data!.orders} onChange={reload} />
+          {data!.orders.length === 0 ? <Empty title="Ничего не ждёт действия">Новые заявки появятся здесь автоматически.</Empty> : <AdminOrdersTable orders={data!.orders} onChange={reload} />}
           {data!.total > data!.per && <div className="sheet-foot row between"><Button size="sm" disabled={page <= 1} onClick={() => setPage(page - 1)}>Назад</Button><span className="small muted">{page} / {Math.ceil(data!.total / data!.per)}</span><Button size="sm" disabled={page * data!.per >= data!.total} onClick={() => setPage(page + 1)}>Дальше</Button></div>}
         </div>
       )}
@@ -427,7 +435,7 @@ export function AdminTicket() {
   if (error) return <LoadError error={error} retry={reload} />;
   const t = data!.ticket;
   return (
-    <div className="stack g16" style={{ maxWidth: 820 }}>
+    <div className="stack g16 admin-ticket">
       <div>
         <Link to="/admin/tickets" className="back"><ArrowLeft />Поддержка</Link>
         <div className="page-head" style={{ marginBottom: 0 }}>
@@ -472,7 +480,7 @@ export function AdminSystem() {
         </dl></div></section>
         <section className="sheet"><div className="sheet-head"><h2>Источники данных</h2></div>
           <div className="list">{d.sources.map((s: any) => (
-            <div key={s.name} className="list-row"><span className="dot" style={{ background: s.ok ? "var(--up)" : s.error_count ? "var(--down)" : "var(--faint)" }} /><div className="grow"><div className="title">{s.name}</div><div className="sub">{s.ok ? `OK, ${ago(Math.floor(new Date(s.last_ok).getTime() / 1000))}` : s.last_error || "не использовался"}</div></div><span className="small muted">ошибок {s.error_count}</span></div>
+            <div key={s.name} className="list-row"><span className="dot" style={{ background: s.ok ? "var(--up)" : s.warn ? "var(--warn)" : s.error_count ? "var(--down)" : "var(--faint)" }} /><div className="grow"><div className="title">{SOURCE_NAMES[s.name] || s.name}</div><div className="sub">{s.ok ? `Работает, обновлено ${ago(Math.floor(new Date(s.last_ok).getTime() / 1000))}` : s.warn ? <>{s.last_error}. {s.note}</> : s.last_error || "не использовался"}</div></div><span className="small muted">{s.error_count ? `сбоев: ${s.error_count}` : ""}</span></div>
           ))}</div>
           {d.rates?.usd > 0 && <div className="sheet-foot small muted">Курс НБРБ на {d.rates.date}: USD {d.rates.usd}</div>}
         </section>

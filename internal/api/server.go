@@ -222,6 +222,8 @@ func (s *Server) routes(m *http.ServeMux) {
 	staff("GET /api/v1/admin/tickets", s.adminTickets)
 	staff("GET /api/v1/admin/tickets/{id}", s.adminTicket)
 	staff("POST /api/v1/admin/tickets/{id}/reply", s.adminTicketReply)
+	staff("GET /api/v1/admin/users/{id}/export/{kind}", s.adminUserExport)
+	staff("GET /api/v1/admin/orders/export.csv", s.adminOrdersExport)
 	staff("POST /api/v1/admin/tickets/{id}/status", s.adminTicketStatus)
 	staff("GET /api/v1/admin/orders", s.adminOrders)
 	admin("POST /api/v1/admin/orders/{id}/payout-done", s.adminPayoutDone)

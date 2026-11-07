@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -335,5 +336,44 @@ func TestAuditExportAndSessionRevoke(t *testing.T) {
 	}
 	if code := c.do("GET", "/api/v1/plans", nil, nil); code != 200 {
 		t.Fatalf("текущий сеанс сломался: %d", code)
+	}
+}
+
+func TestAdminExports(t *testing.T) {
+	srv, s := newServer(t)
+	c := newClient(t, srv.URL)
+	c.register("client@test.by")
+	c.bindCard()
+	c.plan("A", true)
+	staff := newClient(t, srv.URL)
+	staff.register("ops@test.by")
+	su, _ := s.St.UserByEmail(context.Background(), "ops@test.by")
+	s.St.UpdateUserFields(context.Background(), su.ID, map[string]any{"role": "support"})
+	cu, _ := s.St.UserByEmail(context.Background(), "client@test.by")
+	get := func(cl *client, path string) (int, string) {
+		resp, err := cl.hc.Get(srv.URL + path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		return resp.StatusCode, string(b)
+	}
+	for kind, want := range map[string]string{"operations": "Пополнение", "telegram": "Кто", "audit": "Регистрация"} {
+		code, body := get(staff, fmt.Sprintf("/api/v1/admin/users/%d/export/%s", cu.ID, kind))
+		if code != 200 || !strings.Contains(body, want) {
+			t.Fatalf("%s: %d %q", kind, code, body)
+		}
+	}
+	if code, _ := get(c, fmt.Sprintf("/api/v1/admin/users/%d/export/audit", cu.ID)); code != 403 && code != 404 {
+		t.Fatalf("клиент скачал админскую выгрузку: %d", code)
+	}
+	code, body := get(staff, "/api/v1/admin/orders/export.csv")
+	if code != 200 || !strings.Contains(body, "client@test.by") {
+		t.Fatalf("все операции: %d %q", code, body)
+	}
+	_, journal := get(staff, fmt.Sprintf("/api/v1/admin/users/%d/export/audit", cu.ID))
+	if !strings.Contains(journal, "Сотрудник выгрузил данные") {
+		t.Fatal("выгрузка сотрудником не попала в журнал пользователя")
 	}
 }

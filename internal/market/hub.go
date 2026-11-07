@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"math"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 )
@@ -27,6 +28,8 @@ type candleEntry struct {
 type SourceStatus struct {
 	Name     string    `json:"name"`
 	OK       bool      `json:"ok"`
+	Warn     bool      `json:"warn"` // источник не ответил, но работаем на сохранённых данных
+	Note     string    `json:"note"`
 	LastOK   time.Time `json:"last_ok"`
 	LastErr  string    `json:"last_error"`
 	ErrCount int       `json:"error_count"`
@@ -155,6 +158,8 @@ func (h *Hub) Start(ctx context.Context) {
 	go func() {
 		qt := time.NewTicker(5 * time.Second)
 		rt := time.NewTicker(30 * time.Minute)
+		retry := time.NewTicker(2 * time.Minute) // пока НБРБ недоступен — пробуем чаще
+		defer retry.Stop()
 		ht := time.NewTicker(12 * time.Hour)
 		defer qt.Stop()
 		defer rt.Stop()
@@ -167,6 +172,13 @@ func (h *Hub) Start(ctx context.Context) {
 				h.refreshQuotes(ctx)
 			case <-rt.C:
 				h.refreshRates(ctx)
+			case <-retry.C:
+				h.mu.Lock()
+				down := h.status["nbrb"] != nil && !h.status["nbrb"].OK
+				h.mu.Unlock()
+				if down {
+					h.refreshRates(ctx)
+				}
 			case <-ht.C:
 				h.loadHistory(ctx)
 			}
@@ -183,21 +195,56 @@ func (h *Hub) mark(name string, err error) {
 		h.status[name] = st
 	}
 	if err != nil {
-		st.OK = false
+		st.OK, st.Warn, st.Note = false, false, ""
 		st.LastErr = err.Error()
 		st.ErrCount++
 		return
 	}
-	st.OK = true
+	st.OK, st.Warn, st.Note = true, false, ""
 	st.LastOK = time.Now()
 }
 
+// markWarn — источник недоступен, но есть сохранённые данные: не авария, а предупреждение с пояснением.
+func (h *Hub) markWarn(name, note string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if st := h.status[name]; st != nil {
+		st.Warn, st.Note = true, note
+	}
+}
+
+// humanErr — понятное описание сетевой ошибки для админки.
+func humanErr(err error) string {
+	msg := err.Error()
+	switch {
+	case errors.Is(err, context.DeadlineExceeded) || strings.Contains(msg, "deadline exceeded") || strings.Contains(msg, "Timeout"):
+		return "не отвечает (истекло время ожидания)"
+	case strings.Contains(msg, "no such host"):
+		return "адрес не найден (DNS)"
+	case strings.Contains(msg, "connection refused"):
+		return "соединение отклонено"
+	}
+	return msg
+}
+
 func (h *Hub) refreshRates(ctx context.Context) {
-	c, cancel := context.WithTimeout(ctx, 3*time.Second)
-	defer cancel()
-	r, err := h.rateSrc.Current(c)
-	h.mark("nbrb", err)
+	// сайт НБРБ иногда отвечает медленно или пропадает целиком: ждём дольше и пробуем дважды
+	var r Rates
+	var err error
+	for attempt := 0; attempt < 2; attempt++ {
+		c, cancel := context.WithTimeout(ctx, 10*time.Second)
+		r, err = h.rateSrc.Current(c)
+		cancel()
+		if err == nil || ctx.Err() != nil {
+			break
+		}
+		select {
+		case <-time.After(2 * time.Second):
+		case <-ctx.Done():
+		}
+	}
 	if err != nil {
+		h.mark("nbrb", errors.New("НБРБ "+humanErr(err)))
 		h.log.Warn("курсы НБРБ недоступны", "err", err)
 		h.mu.Lock()
 		empty := h.rates.USD <= 0
@@ -211,8 +258,15 @@ func (h *Hub) refreshRates(ctx context.Context) {
 				h.log.Warn("используется последний сохранённый курс НБРБ", "usd", saved.USD, "date", saved.Date)
 			}
 		}
+		h.mu.Lock()
+		cur := h.rates
+		h.mu.Unlock()
+		if cur.USD > 0 {
+			h.markWarn("nbrb", fmt.Sprintf("Работаем на последнем полученном курсе: 1 USD = %.4f руб. (%s). Повторяем каждые 2 минуты.", cur.USD, cur.Date))
+		}
 		return
 	}
+	h.mark("nbrb", nil)
 	h.mu.Lock()
 	h.rates = r
 	h.mu.Unlock()

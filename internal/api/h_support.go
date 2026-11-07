@@ -132,7 +132,8 @@ func (s *Server) replyTicket(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, r, err)
 		return
 	}
-	s.alertSupport(fmt.Sprintf("Ответ в обращении #%d от %s\n%s", t.ID, html.EscapeString(u.Email), html.EscapeString(truncate(body, 500))))
+	s.alertSupport(fmt.Sprintf("Клиент ответил по обращению #%d (%s)\n<b>%s</b>\n%s\n\nОтветьте на это сообщение (reply), чтобы ответить клиенту.",
+		t.ID, html.EscapeString(u.Email), html.EscapeString(t.Subject), html.EscapeString(truncate(body, 500))))
 	s.getTicket(w, r)
 }
 
@@ -191,8 +192,10 @@ func (s *Server) adminTicketReply(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.St.Audit(r.Context(), t.UserID, staff.ID, "support.reply", fmt.Sprintf("ticket %d", t.ID), clientIP(r))
-	s.N.Send(r.Context(), t.UserID, notify.Message{Kind: "support", Title: "Ответ поддержки: " + t.Subject, Body: truncate(body, 300),
-		Link: fmt.Sprintf("/app/support/%d", t.ID), Email: true})
+	if full, err := s.St.Ticket(r.Context(), 0, t.ID); err == nil {
+		t = full
+	}
+	s.N.Send(r.Context(), t.UserID, notify.SupportReply(t, body))
 	s.adminTicket(w, r)
 }
 

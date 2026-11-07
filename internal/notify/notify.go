@@ -56,6 +56,8 @@ type Message struct {
 	Body  string
 	Link  string // путь в приложении, например /app/plans/3
 	Email bool   // дублировать письмом
+	TG    string // свой текст для Telegram (HTML); пусто — заголовок и текст
+	Mail  string // свой текст письма; пусто — Body
 }
 
 // Send сохраняет уведомление и рассылает его по включённым каналам. Ошибки каналов не прерывают работу.
@@ -76,12 +78,16 @@ func (n *Notifier) Send(ctx context.Context, userID int64, m Message) {
 	tg := n.tg
 	n.mu.RUnlock()
 	if tg != nil && u.TelegramChatID != nil && u.NotifyTelegram {
-		text := "<b>" + escapeHTML(m.Title) + "</b>"
-		if m.Body != "" {
-			text += "\n" + escapeHTML(m.Body)
+		text := m.TG
+		if text == "" {
+			text = "<b>" + escapeHTML(m.Title) + "</b>"
+			if m.Body != "" {
+				text += "\n" + escapeHTML(m.Body)
+			}
 		}
-		if m.Link != "" {
-			text += "\n<a href=\"" + n.publicURL + m.Link + "\">Открыть в AutoInvest</a>"
+		// Telegram делает ссылку кликабельной только для настоящего адреса сайта (https), localhost он не открывает
+		if m.Link != "" && strings.HasPrefix(n.publicURL, "https://") {
+			text += "\n\n<a href=\"" + n.publicURL + m.Link + "\">Открыть в AutoInvest →</a>"
 		}
 		go func(chat int64) {
 			if err := tg.Send(chat, text); err != nil {
@@ -91,11 +97,49 @@ func (n *Notifier) Send(ctx context.Context, userID int64, m Message) {
 	}
 	if m.Email && u.NotifyEmail && n.mail != nil {
 		body := m.Body
+		if m.Mail != "" {
+			body = m.Mail
+		}
 		if m.Link != "" {
 			body += "\n\n" + n.publicURL + m.Link
 		}
 		go n.mail.Send(u.Email, m.Title, body)
 	}
+}
+
+// SupportReply — уведомление об ответе поддержки: номер обращения, тема, вопрос клиента и ответ.
+// В Telegram на него можно ответить (reply) — текст добавится в это же обращение.
+func SupportReply(t *store.Ticket, answer string) Message {
+	question := ""
+	for i := len(t.Messages) - 1; i >= 0; i-- {
+		if !t.Messages[i].IsStaff {
+			question = t.Messages[i].Body
+			break
+		}
+	}
+	question = cut(question, 400)
+	answer = strings.TrimSpace(answer)
+	tg := fmt.Sprintf("<b>Ответ поддержки · обращение №%d</b>\nТема: %s\n", t.ID, escapeHTML(t.Subject))
+	if question != "" {
+		tg += "\n<i>Ваш вопрос:</i>\n" + escapeHTML(question) + "\n"
+	}
+	tg += "\n<i>Ответ:</i>\n" + escapeHTML(cut(answer, 3000)) +
+		"\n\nЧтобы ответить, нажмите на это сообщение → «Ответить» и напишите текст — он попадёт в это же обращение."
+	mail := fmt.Sprintf("Обращение №%d: %s\n\n", t.ID, t.Subject)
+	if question != "" {
+		mail += "Ваш вопрос:\n" + question + "\n\n"
+	}
+	mail += "Ответ поддержки:\n" + answer
+	return Message{Kind: "support", Title: fmt.Sprintf("Ответ поддержки по обращению №%d", t.ID), Body: cut(answer, 300),
+		Link: fmt.Sprintf("/app/support/%d", t.ID), Email: true, TG: tg, Mail: mail}
+}
+
+func cut(s string, n int) string {
+	r := []rune(strings.TrimSpace(s))
+	if len(r) > n {
+		return string(r[:n]) + "…"
+	}
+	return string(r)
 }
 
 func escapeHTML(s string) string {

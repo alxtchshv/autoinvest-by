@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"log/slog"
 	"strconv"
@@ -49,6 +50,7 @@ func TestTelegramBotInSandbox(t *testing.T) {
 	}
 	go bot.Run(ctx)
 	s.Bot, s.TG = bot, tg
+	s.N.SetMessenger(bot)
 
 	c := newClient(t, srv.URL)
 	c.register("tg@test.by")
@@ -144,5 +146,35 @@ func TestTelegramBotInSandbox(t *testing.T) {
 	c.do("GET", "/api/v1/support/tickets", nil, &tickets)
 	if len(tickets.Tickets) != 1 || !strings.Contains(tickets.Tickets[0].Subject, "Когда придут деньги") {
 		t.Fatalf("обращение: %+v", tickets.Tickets)
+	}
+	tid := tickets.Tickets[0].ID
+
+	// ответ поддержки приходит подробно: номер, тема, вопрос, ответ
+	staff := newClient(t, srv.URL)
+	staff.register("staff@test.by")
+	su, _ := s.St.UserByEmail(context.Background(), "staff@test.by")
+	s.St.UpdateUserFields(context.Background(), su.ID, map[string]any{"role": "support"})
+	if code := staff.do("POST", fmt.Sprintf("/api/v1/admin/tickets/%d/reply", tid), map[string]any{"body": "Обычно в течение дня"}, nil); code != 200 {
+		t.Fatalf("ответ поддержки: %d", code)
+	}
+	reply := waitBot(t, c, fmt.Sprintf("обращение №%d", tid))
+	for _, want := range []string{"Ваш вопрос", "Когда придут деньги после вывода", "Обычно в течение дня", "«Ответить»"} {
+		if !strings.Contains(reply.Text, want) {
+			t.Fatalf("в ответе нет %q:\n%s", want, reply.Text)
+		}
+	}
+	if strings.Contains(reply.Text, "Открыть в AutoInvest") {
+		t.Fatal("ссылка на localhost не должна показываться в Telegram")
+	}
+	// клиент отвечает на это сообщение — текст попадает в то же обращение
+	if !tg.UserReplies(9_000_000_000+me2.ID, "x", "А если банк задержит?", reply.ID) {
+		t.Fatal("не удалось ответить")
+	}
+	waitBot(t, c, fmt.Sprintf("Добавили в обращение №%d", tid))
+	var full struct{ Ticket store.Ticket }
+	c.do("GET", fmt.Sprintf("/api/v1/support/tickets/%d", tid), nil, &full)
+	last := full.Ticket.Messages[len(full.Ticket.Messages)-1]
+	if last.Body != "А если банк задержит?" || last.IsStaff || full.Ticket.Status != "open" {
+		t.Fatalf("сообщение клиента: %+v статус %s", last, full.Ticket.Status)
 	}
 }

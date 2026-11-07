@@ -90,6 +90,30 @@ func (s *Sandbox) UserSays(chat int64, username, text string) {
 	s.notify()
 }
 
+// UserReplies — пользователь ответил (reply) на сообщение бота с номером replyTo.
+func (s *Sandbox) UserReplies(chat int64, username, text string, replyTo int64) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var orig *SandboxMsg
+	for _, m := range s.chats[chat] {
+		if m.ID == replyTo {
+			orig = m
+		}
+	}
+	if orig == nil {
+		return false
+	}
+	m := s.addMsg(chat, false, text, false, nil)
+	s.updID++
+	upd, _ := json.Marshal(map[string]any{"update_id": s.updID, "message": map[string]any{
+		"message_id": m.ID, "text": text, "chat": map[string]any{"id": chat, "type": "private"},
+		"from":             map[string]any{"id": chat, "username": username},
+		"reply_to_message": map[string]any{"message_id": orig.ID, "text": plainText(orig.Text), "chat": map[string]any{"id": chat, "type": "private"}}}})
+	s.queue = append(s.queue, upd)
+	s.notify()
+	return true
+}
+
 // UserPress — пользователь нажал кнопку под сообщением бота.
 func (s *Sandbox) UserPress(chat, msgID int64, data, username string) bool {
 	s.mu.Lock()

@@ -359,6 +359,9 @@ func (b *Bot) Handle(ctx context.Context, u update) {
 	case u.Message != nil && u.Message.Chat.Type == "private" && u.Message.Contact != nil:
 		b.onContact(ctx, u.Message)
 	case u.Message != nil && u.Message.Chat.Type == "private":
+		if b.clientReply(ctx, u.Message) {
+			return
+		}
 		b.handle(ctx, u.Message.Chat.ID, u.Message.From.Username, strings.TrimSpace(u.Message.Text))
 	case u.Message != nil && u.Message.Chat.Type != "private" && strings.HasPrefix(strings.ToLower(strings.TrimSpace(u.Message.Text)), "/chatid"):
 		// помощь при настройке: узнать ID группы поддержки прямо в Telegram
@@ -651,14 +654,53 @@ func (b *Bot) createTicket(ctx context.Context, chat int64, text string) {
 		return
 	}
 	b.St.Audit(ctx, u.ID, u.ID, "support.ticket", "telegram", "")
-	b.send(chat, fmt.Sprintf("Обращение №%d отправлено. Ответим в рабочие дни с 9:00 до 21:00, обычно в течение часа.", id), b.mainMenu())
+	b.send(chat, fmt.Sprintf("Обращение №%d отправлено. Ответим здесь же — в рабочие дни с 9:00 до 21:00, обычно в течение часа.\nЧтобы дополнить вопрос, ответьте (reply) на это сообщение.", id), b.mainMenu())
 	if b.SupportChatID != 0 {
 		b.send(b.SupportChatID, fmt.Sprintf("Новое обращение #%d из Telegram от %s\n<b>%s</b>\n%s\n\nОтветьте на это сообщение (reply), чтобы ответить клиенту.",
 			id, escape(u.Email), escape(subj), escape(text)), nil)
 	}
 }
 
-var ticketRe = regexp.MustCompile(`обращение #(\d+)`)
+var (
+	ticketRe       = regexp.MustCompile(`обращени[еяюи] #(\d+)`)   // в чате поддержки: «Новое обращение #12»
+	clientTicketRe = regexp.MustCompile(`обращени[еяю] №\s*(\d+)`) // у клиента: «Ответ поддержки · обращение №12»
+)
+
+// clientReply — клиент ответил (reply) на сообщение бота об обращении: текст добавляется в это обращение.
+func (b *Bot) clientReply(ctx context.Context, m *tgMessage) bool {
+	if m.ReplyTo == nil || strings.TrimSpace(m.Text) == "" || strings.HasPrefix(m.Text, "/") {
+		return false
+	}
+	mm := clientTicketRe.FindStringSubmatch(strings.ToLower(m.ReplyTo.Text))
+	if mm == nil {
+		return false
+	}
+	u, ok := b.user(ctx, m.Chat.ID)
+	if !ok {
+		return true
+	}
+	id, _ := strconv.ParseInt(mm[1], 10, 64)
+	t, err := b.St.Ticket(ctx, u.ID, id) // только своё обращение
+	if err != nil {
+		b.send(m.Chat.ID, fmt.Sprintf("Обращение №%d не найдено.", id), nil)
+		return true
+	}
+	text := strings.TrimSpace(m.Text)
+	if r := []rune(text); len(r) > 4000 {
+		text = string(r[:4000])
+	}
+	if err := b.St.AddTicketMessage(ctx, t.ID, u.ID, false, text); err != nil {
+		b.send(m.Chat.ID, "Не получилось добавить сообщение, попробуйте позже.", nil)
+		return true
+	}
+	b.St.Audit(ctx, u.ID, u.ID, "support.message", fmt.Sprintf("ticket %d (telegram)", t.ID), "")
+	b.send(m.Chat.ID, fmt.Sprintf("Добавили в обращение №%d. Ответ придёт сюда же.", t.ID), nil)
+	if b.SupportChatID != 0 {
+		b.send(b.SupportChatID, fmt.Sprintf("Клиент ответил по обращению #%d (%s)\n<b>%s</b>\n%s\n\nОтветьте на это сообщение (reply), чтобы ответить клиенту.",
+			t.ID, escape(u.Email), escape(t.Subject), escape(text)), nil)
+	}
+	return true
+}
 
 // staffReply — сотрудник ответил (reply) на уведомление о новом обращении в чате поддержки.
 func (b *Bot) staffReply(ctx context.Context, m *tgMessage) {
@@ -687,8 +729,10 @@ func (b *Bot) staffReply(ctx context.Context, m *tgMessage) {
 	}
 	b.St.Audit(ctx, t.UserID, staff.ID, "support.reply", fmt.Sprintf("ticket %d (telegram)", t.ID), "")
 	if b.En != nil && b.En.N != nil {
-		b.En.N.Send(ctx, t.UserID, notify.Message{Kind: "support", Title: "Ответ поддержки: " + t.Subject, Body: body,
-			Link: fmt.Sprintf("/app/support/%d", t.ID), Email: true})
+		if full, err := b.St.Ticket(ctx, 0, t.ID); err == nil {
+			t = full
+		}
+		b.En.N.Send(ctx, t.UserID, notify.SupportReply(t, body))
 	}
 	b.send(m.Chat.ID, fmt.Sprintf("Ответ по обращению #%d отправлен клиенту.", t.ID), nil)
 }

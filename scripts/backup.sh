@@ -4,9 +4,9 @@
 #
 # Переменные:
 #   BACKUP_DIR         куда класть копии (по умолчанию ./backups)
-#   AUTOINVEST_BIN     как вызвать программу; для Docker:
-#                      AUTOINVEST_BIN="docker compose -f deploy/docker-compose.yml exec -T app autoinvest"
-#                      (тогда BACKUP_DIR должен быть внутри тома данных, например /var/lib/autoinvest/backups)
+#   AUTOINVEST_BIN     как вызвать программу (без Docker), по умолчанию ./bin/autoinvest
+#   BACKUP_DOCKER=1    сервис запущен через deploy/docker-compose.yml: копия делается внутри контейнера
+#                      и забирается на сервер в BACKUP_DIR (например /opt/autoinvest/backups)
 #   RESTIC_REPOSITORY  если задан — копия ещё и отправляется в restic (шифрование, хранение в другом ЦОД)
 #   RESTIC_PASSWORD    пароль репозитория restic
 set -eu
@@ -18,11 +18,22 @@ STAMP="$(date +%Y%m%d-%H%M%S)"
 FILE="$BACKUP_DIR/hourly/autoinvest-$STAMP.db"
 
 mkdir -p "$BACKUP_DIR/hourly" "$BACKUP_DIR/daily"
-$AUTOINVEST_BIN backup "$FILE"
-
-# каталог kyc с файлами документов — рядом с базой
-if [ -d "${DATA_DIR:-data}/kyc" ]; then
-  tar -czf "$BACKUP_DIR/hourly/kyc-$STAMP.tar.gz" -C "${DATA_DIR:-data}" kyc
+if [ "${BACKUP_DOCKER:-}" = "1" ]; then
+  # внутри контейнера своя файловая система: делаем копию там и забираем её на сервер
+  COMPOSE="docker compose -f deploy/docker-compose.yml"
+  TMP=/var/lib/autoinvest/backup-tmp.db
+  $COMPOSE exec -T app autoinvest backup "$TMP"
+  $COMPOSE cp "app:$TMP" "$FILE"
+  $COMPOSE exec -T app rm -f "$TMP"
+  if $COMPOSE exec -T app test -d /var/lib/autoinvest/kyc; then
+    $COMPOSE exec -T app tar -czf - -C /var/lib/autoinvest kyc > "$BACKUP_DIR/hourly/kyc-$STAMP.tar.gz"
+  fi
+else
+  $AUTOINVEST_BIN backup "$FILE"
+  # каталог kyc с файлами документов — рядом с базой
+  if [ -d "${DATA_DIR:-data}/kyc" ]; then
+    tar -czf "$BACKUP_DIR/hourly/kyc-$STAMP.tar.gz" -C "${DATA_DIR:-data}" kyc
+  fi
 fi
 
 # одна копия в сутки переносится в daily

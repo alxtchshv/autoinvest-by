@@ -295,6 +295,14 @@
 .admin-shell .nav a.active { background: #2a3246; color: #fff; }
 .admin-shell .nav a.active svg { color: #9fb0ff; }
 .admin-shell .nav-sep { background: #2a3040; }
+.admin-shell .side-foot { border-top: 1px solid rgba(255, 255, 255, .1); }
+.admin-shell .side-user { color: #e4e7ee; }
+.admin-shell .side-user:hover { background: #222836; color: #fff; }
+.admin-shell .side-user .tiny { color: #8a919e; }
+.admin-shell .avatar { background: #2a3246; color: #c9d3ff; }
+.admin-shell .side-toggle { background: #222836; color: #c7ccd6; }
+.admin-shell .side-toggle:hover { background: #2a3246; color: #fff; }
+.admin-shell.collapsed .side-toggle { background: #2a3246; color: #c9d3ff; }
 .metric-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0; }
 .metric-grid > div { padding: 18px 20px; border-left: 1px solid var(--line-2); border-top: 1px solid var(--line-2); }
 .metric-grid > div:nth-child(4n+1) { border-left: 0; }

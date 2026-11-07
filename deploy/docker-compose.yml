@@ -6,7 +6,7 @@ services:
     env_file: ../.env
     environment:
       DATA_DIR: /var/lib/autoinvest
-      APP_ENV: production
+      # APP_ENV берётся из .env (по умолчанию в образе — production)
     volumes:
       - data:/var/lib/autoinvest
     restart: unless-stopped

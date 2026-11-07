@@ -1,7 +1,7 @@
 import { DatePicker } from "../../components/DatePicker";
 import { Suspense, useState } from "react";
 import { Link, NavLink, Outlet, useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { ArrowLeft, Download, Gauge, IdCard, LayoutDashboard, ListOrdered, MessageSquare, Search, Users, House } from "lucide-react";
+import { ArrowLeft, Download, PanelLeftClose, PanelLeftOpen, Gauge, IdCard, LayoutDashboard, ListOrdered, MessageSquare, Search, Users, House } from "lucide-react";
 import { api } from "../../lib/api";
 import { ago, byn, dateNum, dateTime, kop } from "../../lib/format";
 import { useLoad, useSubmit, useTitle } from "../../lib/hooks";
@@ -13,32 +13,53 @@ import { ChatView } from "../app/Support";
 
 const SOURCE_NAMES: Record<string, string> = { nbrb: "Курсы НБРБ", binance: "Binance", bybit: "Bybit", coingecko: "CoinGecko", yahoo: "Yahoo Finance (акции США)" };
 
+const ADMIN_SIDE_KEY = "ai_admin_side_collapsed";
+
 export function AdminLayout() {
   const { me } = useSession();
+  const [collapsed, setCollapsed] = useState(() => { try { return localStorage.getItem(ADMIN_SIDE_KEY) === "1"; } catch { return false; } });
+  const toggle = () => setCollapsed((c) => { try { localStorage.setItem(ADMIN_SIDE_KEY, c ? "0" : "1"); } catch { /* */ } return !c; });
+  const item = (to: string, label: string, Icon: typeof House, end?: boolean) => (
+    <NavLink to={to} end={end} title={collapsed ? label : undefined}><Icon /><span className="nav-label">{label}</span></NavLink>
+  );
+  const name = me?.user?.name || "";
+  const ini = name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join("").toUpperCase() || "A";
   return (
-    <>
-      <ModeBanner />
-      <div className="shell admin-shell">
-        <aside className="side">
-          <Link to="/admin" className="brand"><Logo />AutoInvest <small>админка</small></Link>
-          <nav className="nav">
-            <NavLink to="/admin" end><LayoutDashboard />Обзор</NavLink>
-            <NavLink to="/admin/users"><Users />Пользователи</NavLink>
-            <NavLink to="/admin/kyc"><IdCard />Верификация</NavLink>
-            <NavLink to="/admin/tickets"><MessageSquare />Поддержка</NavLink>
-            <NavLink to="/admin/orders"><ListOrdered />Операции</NavLink>
-            <NavLink to="/admin/system"><Gauge />Система</NavLink>
-            <div className="nav-sep" />
-            <NavLink to="/app"><House />В приложение</NavLink>
-          </nav>
-          <div className="side-foot small" style={{ color: "#8a919e", padding: "0 12px" }}>{me?.user?.email} · {me?.user?.role === "admin" ? "администратор" : "поддержка"}</div>
-        </aside>
-        <div className="main">
-          <header className="topbar"><span className="page-title">Панель управления</span><span className="spacer" /><Link to="/app" className="btn btn-ghost btn-sm mobile-brand">В приложение</Link></header>
-          <main className="content"><Suspense fallback={<PageLoader />}><Outlet /></Suspense></main>
+    <div className={`shell admin-shell ${collapsed ? "collapsed" : ""}`}>
+      <aside className="side">
+        <div className="side-top">
+          <Link to="/admin" className="brand" title="Админка"><Logo /><span className="nav-label">Админка</span></Link>
+          <button className="side-toggle" onClick={toggle} aria-label={collapsed ? "Развернуть меню" : "Свернуть меню"} title={collapsed ? "Развернуть меню" : "Свернуть меню"}>
+            {collapsed ? <PanelLeftOpen /> : <PanelLeftClose />}
+          </button>
         </div>
+        <nav className="nav">
+          {item("/admin", "Обзор", LayoutDashboard, true)}
+          {item("/admin/users", "Пользователи", Users)}
+          {item("/admin/kyc", "Верификация", IdCard)}
+          {item("/admin/tickets", "Поддержка", MessageSquare)}
+          {item("/admin/orders", "Операции", ListOrdered)}
+          {item("/admin/system", "Система", Gauge)}
+          <div className="nav-sep" />
+          {item("/app", "В приложение", House)}
+        </nav>
+        {/* сотрудник — внизу слева, за тонкой полупрозрачной линией, как в кабинете */}
+        <div className="side-foot">
+          <div className="side-user" title={collapsed ? `${me?.user?.email} · ${me?.user?.role === "admin" ? "администратор" : "поддержка"}` : undefined}>
+            <span className="avatar">{ini}</span>
+            <span className="grow nav-label" style={{ minWidth: 0 }}>
+              <div style={{ fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{me?.user?.email}</div>
+              <div className="tiny">{me?.user?.role === "admin" ? "Администратор" : "Поддержка"}</div>
+            </span>
+          </div>
+        </div>
+      </aside>
+      <div className="main">
+        <ModeBanner />
+        <header className="topbar"><span className="page-title">Панель управления</span><span className="spacer" /><Link to="/app" className="btn btn-ghost btn-sm mobile-brand">В приложение</Link></header>
+        <main className="content"><Suspense fallback={<PageLoader />}><Outlet /></Suspense></main>
       </div>
-    </>
+    </div>
   );
 }
 

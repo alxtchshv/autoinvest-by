@@ -1,0 +1,8 @@
+# Единые окончания строк на macOS, Linux и Windows: скрипты для Linux/macOS — LF (иначе не запустятся в Docker и bash),
+# bat-файлы для Windows — CRLF.
+* text=auto eol=lf
+*.sh text eol=lf
+*.bat text eol=crlf
+*.png binary
+*.woff2 binary
+*.svg text eol=lf

@@ -22,7 +22,6 @@ import (
 	"autoinvest/internal/market"
 	"autoinvest/internal/notify"
 	"autoinvest/internal/payments"
-	"autoinvest/internal/sms"
 	"autoinvest/internal/store"
 	"autoinvest/internal/telegram"
 )
@@ -44,14 +43,12 @@ type Server struct {
 	N       *notify.Notifier
 	Bot     *telegram.Bot
 	TG      *telegram.Sandbox // тестовый Telegram (только при разработке)
-	SMS     sms.Sender
 	Log     *slog.Logger
 	Static  fs.FS
 	Version string
 	Started time.Time
 
 	limiter *limiter
-	smsOnce sync.Once
 	statsMu sync.Mutex
 	stats   map[string]statsEntry
 	showMu  sync.Mutex
@@ -94,9 +91,12 @@ func (s *Server) routes(m *http.ServeMux) {
 	pub("GET /api/v1/config", s.getConfig)
 
 	// авторизация
-	pub("POST /api/v1/auth/register", s.register)
+	pub("POST /api/v1/auth/register/start", s.registerStart)
+	pub("POST /api/v1/auth/register/confirm", s.registerConfirm)
 	pub("POST /api/v1/auth/login", s.login)
 	pub("POST /api/v1/auth/login/2fa", s.login2FA)
+	pub("POST /api/v1/auth/login/passkey/begin", s.loginPasskeyBegin)
+	pub("POST /api/v1/auth/login/passkey/finish", s.loginPasskeyFinish)
 	pub("POST /api/v1/auth/logout", s.logout)
 	pub("GET /api/v1/auth/me", s.me)
 	pub("POST /api/v1/auth/verify-email", s.verifyEmail)
@@ -130,9 +130,15 @@ func (s *Server) routes(m *http.ServeMux) {
 	user("POST /api/v1/me/risk", s.submitRisk)
 	user("GET /api/v1/me/audit", s.audit)
 	user("GET /api/v1/me/identities", s.identities)
+	user("GET /api/v1/me/passkeys", s.passkeyList)
+	user("POST /api/v1/me/passkeys/begin", s.passkeyRegisterBegin)
+	user("POST /api/v1/me/passkeys/finish", s.passkeyRegisterFinish)
+	user("DELETE /api/v1/me/passkeys/{id}", s.passkeyDelete)
+	user("POST /api/v1/me/stepup/begin", s.stepUpBegin)
+	user("POST /api/v1/me/stepup/finish", s.stepUpFinish)
 	user("DELETE /api/v1/me/identities/{provider}", s.unlinkIdentity)
-	user("POST /api/v1/me/phone/code", s.phoneVerifyCode)
-	user("POST /api/v1/me/phone/verify", s.phoneVerify)
+	user("POST /api/v1/me/phone/telegram", s.phoneViaTelegram)
+	user("DELETE /api/v1/me/phone", s.unlinkPhone)
 	user("GET /api/v1/me/audit/export.csv", s.exportAudit)
 	user("POST /api/v1/me/delete", s.deleteAccount)
 	user("GET /api/v1/kyc", s.getKYC)
@@ -148,6 +154,7 @@ func (s *Server) routes(m *http.ServeMux) {
 	user("GET /api/v1/telegram/sandbox", s.tgSandboxMessages)
 	user("POST /api/v1/telegram/sandbox/send", s.tgSandboxSend)
 	user("POST /api/v1/telegram/sandbox/press", s.tgSandboxPress)
+	user("POST /api/v1/telegram/sandbox/contact", s.tgSandboxContact)
 	user("GET /api/v1/referral", s.referral)
 	user("GET /api/v1/billing", s.billing)
 	user("POST /api/v1/billing/pro", s.buyPro)

@@ -8,7 +8,7 @@ import { useTitle } from "../../lib/hooks";
 import { useMarket, useSession } from "../../lib/session";
 import type { Strategy } from "../../lib/types";
 import { Accordion, AssetIcon, Change, RiskDots, riskLabel } from "../../components/ui";
-import { PITCH, PlanMark, Ring } from "../../components/plans";
+import { PITCH, Ring } from "../../components/plans";
 
 /** Оригинальные названия активов — так их называют биржи и так их узнают. */
 function useAssetName() {
@@ -26,7 +26,8 @@ type ShowItem = {
 const itemTitle = (x: ShowItem) => (x.kind === "strategy" ? planName(x.name) : x.name);
 
 function ItemMark({ x }: { x: ShowItem }) {
-  return x.kind === "strategy" ? <PlanMark id={x.id} size={20} /> : <AssetIcon symbol={x.symbol!} size="sm" />;
+  // у планов значка нет — только название; у монет — логотип
+  return x.kind === "strategy" ? null : <AssetIcon symbol={x.symbol!} size="sm" />;
 }
 
 function useShowcase(amount: number, years: number) {
@@ -86,7 +87,7 @@ function TimeMachine() {
   const plans = data?.filter((x) => x.kind === "strategy").slice(0, 3) || [];
   const assets = data?.filter((x) => x.kind === "asset").slice(0, 3) || [];
   const row = (x: ShowItem) => (
-    <button key={x.id} role="listitem" className={`tm-row ${x.id === cur?.id ? "on" : ""}`} onClick={() => setSel(x.id)}>
+    <button key={x.id} role="listitem" className={`tm-row ${x.kind === "strategy" ? "plan" : ""} ${x.id === cur?.id ? "on" : ""}`} onClick={() => setSel(x.id)}>
       <ItemMark x={x} />
       <span className="tm-name">{itemTitle(x)}</span>
       <span className="tm-nums"><span className="num tm-v">{roundByn(x.value_kop)}</span><span className={`num tm-p ${x.profit_pct >= 0 ? "up" : "down"}`}>{pct(x.profit_pct, { digits: 0 })}</span></span>
@@ -137,7 +138,7 @@ function LiveTicker() {
       <AssetIcon symbol={a.symbol} size="sm" />
       <span className="ticker-name">{a.name}</span>
       <b className="num">{price(q.price_byn)}</b>
-      <Change v={q.change_24h} className="tiny" />
+      {a.kind !== "stable" && <Change v={q.change_24h} className="tiny" />}
     </span>
   ));
   return (

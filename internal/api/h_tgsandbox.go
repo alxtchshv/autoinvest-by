@@ -38,7 +38,7 @@ func (s *Server) tgSandboxMessages(w http.ResponseWriter, r *http.Request) {
 		s.TG.Wait(r.Context(), 20*time.Second)
 		msgs, rev = s.TG.Messages(chat, after)
 	}
-	writeJSON(w, 200, map[string]any{"bot": s.TG.Username, "messages": msgs, "rev": rev})
+	writeJSON(w, 200, map[string]any{"bot": s.TG.Username, "messages": msgs, "rev": rev, "keyboard": s.TG.Keyboard(chat)})
 }
 
 func (s *Server) tgSandboxSend(w http.ResponseWriter, r *http.Request) {
@@ -75,6 +75,30 @@ func (s *Server) tgSandboxPress(w http.ResponseWriter, r *http.Request) {
 	chat, name := s.tgChat(r)
 	if !s.TG.UserPress(chat, in.MessageID, in.Data, name) {
 		writeErr(w, http.StatusBadRequest, "Такой кнопки нет")
+		return
+	}
+	writeJSON(w, 200, map[string]bool{"ok": true})
+}
+
+// POST /telegram/sandbox/contact {phone} — «Поделиться номером» в тестовом Telegram.
+func (s *Server) tgSandboxContact(w http.ResponseWriter, r *http.Request) {
+	if s.tgSandboxOff(w) {
+		return
+	}
+	var in struct {
+		Phone string `json:"phone"`
+	}
+	if !readJSON(w, r, &in) {
+		return
+	}
+	p := normPhone(in.Phone)
+	if !intlPhoneRe.MatchString(p) {
+		writeFieldErr(w, "phone", "Номер в формате +375 29 123-45-67")
+		return
+	}
+	chat, name := s.tgChat(r)
+	if !s.TG.UserSharesContact(chat, name, p) {
+		writeErr(w, http.StatusBadRequest, "Бот не просил номер — отправьте /phone")
 		return
 	}
 	writeJSON(w, 200, map[string]bool{"ok": true})

@@ -50,7 +50,7 @@ export default function Market() {
                         </Link>
                       </td>
                       <td className="r num" style={{ fontWeight: 600 }}>{q ? price(q.price_byn) : "—"}<div className="tiny muted" style={{ fontWeight: 400 }}>{q ? price(q.price_usd, "$") : ""}</div></td>
-                      <td className="r">{q ? <Change v={q.change_24h} /> : "—"}</td>
+                      <td className="r">{a.kind === "stable" ? "" : q ? <Change v={q.change_24h} /> : "—"}</td>
                       <td className="r"><span style={{ display: "inline-block" }}>{a.kind !== "stable" && a.kind !== "bond" && <AssetSpark symbol={a.symbol} />}</span></td>
                       <td><span className="row g8 small"><RiskDots risk={a.risk} /><span className="muted">{riskLabel(a.risk)}</span></span></td>
                     </tr>

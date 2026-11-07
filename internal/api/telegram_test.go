@@ -91,6 +91,34 @@ func TestTelegramBotInSandbox(t *testing.T) {
 		t.Fatalf("чужая кнопка: %d", code)
 	}
 
+	// телефон: бот присылает кнопку «Поделиться номером», номер подтверждается, коды входа приходят в бот
+	if code := c.do("POST", "/api/v1/telegram/sandbox/contact", map[string]any{"phone": "+375291112233"}, nil); code != 400 {
+		t.Fatalf("номер без запроса бота принят: %d", code)
+	}
+	if code := c.do("POST", "/api/v1/me/phone/telegram", map[string]any{}, nil); code != 200 {
+		t.Fatalf("запрос номера: %d", code)
+	}
+	waitBot(t, c, "Поделиться номером")
+	c.do("POST", "/api/v1/telegram/sandbox/contact", map[string]any{"phone": "+375 29 111-22-33"}, nil)
+	waitBot(t, c, "подтверждён")
+	anon := newClient(t, srv.URL)
+	var sent struct {
+		TestCode string `json:"test_code"`
+	}
+	if code := anon.do("POST", "/api/v1/auth/phone/code", map[string]any{"phone": "+375291112233"}, &sent); code != 200 || len(sent.TestCode) != 6 {
+		t.Fatalf("код входа: %d %+v", code, sent)
+	}
+	waitBot(t, c, "Код для входа в AutoInvest: <b>"+sent.TestCode)
+	if code := anon.do("POST", "/api/v1/auth/phone/login", map[string]any{"phone": "+375291112233", "code": sent.TestCode}, nil); code != 200 {
+		t.Fatalf("вход по коду: %d", code)
+	}
+	if code := newClient(t, srv.URL).do("POST", "/api/v1/auth/phone/login", map[string]any{"phone": "+375291112233", "code": sent.TestCode}, nil); code == 200 {
+		t.Fatal("код сработал дважды")
+	}
+	if code := newClient(t, srv.URL).do("POST", "/api/v1/auth/login", map[string]any{"email": "+375 (29) 111-22-33", "password": "parol2026"}, nil); code != 200 {
+		t.Fatalf("вход по номеру и паролю: %d", code)
+	}
+
 	// вопрос в поддержку одним сообщением → обращение на сайте
 	c.do("POST", "/api/v1/telegram/sandbox/send", map[string]any{"text": "/support"}, nil)
 	waitBot(t, c, "Напишите вопрос")

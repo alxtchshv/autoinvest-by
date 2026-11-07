@@ -55,6 +55,7 @@ func (s *Server) changePassword(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Current string `json:"current"`
 		New     string `json:"new"`
+		Code    string `json:"code"`
 	}
 	if !readJSON(w, r, &in) {
 		return
@@ -67,6 +68,12 @@ func (s *Server) changePassword(w http.ResponseWriter, r *http.Request) {
 	if u.HasPassword && !auth.CheckPassword(u.PasswordHash, in.Current) {
 		writeFieldErr(w, "current", "Текущий пароль указан неверно")
 		return
+	}
+	if u.TOTPEnabled && !s.stepUpValid(r) {
+		if _, ok := auth.VerifyTOTPStep(u.TOTPSecret, strings.TrimSpace(in.Code), time.Now(), u.TOTPLastStep); !ok && !s.useRecoveryCode(r, u, strings.TrimSpace(in.Code)) {
+			writeFieldErr(w, "code", "Введите код из Google Authenticator")
+			return
+		}
 	}
 	if err := auth.ValidatePassword(in.New); err != nil {
 		writeFieldErr(w, "new", err.Error())
@@ -306,12 +313,12 @@ func (s *Server) deleteAccount(w http.ResponseWriter, r *http.Request) {
 	u := currentUser(r)
 	var in struct {
 		Password string `json:"password"`
+		Code     string `json:"code"`
 	}
 	if !readJSON(w, r, &in) {
 		return
 	}
-	if msg := passwordGate(u, in.Password); msg != "" {
-		writeFieldErr(w, "password", msg)
+	if !s.confirmAction(w, r, in.Password, in.Code) {
 		return
 	}
 	plans, _ := s.St.Plans(r.Context(), u.ID, true)

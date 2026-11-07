@@ -88,10 +88,6 @@ type Config struct {
 	AppleKeyID         string
 	ApplePrivateKey    string // содержимое .p8
 
-	SMSProvider     string // sandbox | telegram | http | off — коды для входа по телефону
-	TGGatewayKey    string
-	SMSHTTPURL      string
-	SMSHTTPToken    string
 	TelegramSandbox bool  // встроенный тестовый Telegram (без токена бота) — только не в продакшене
 	FeeFreeBP       int64 // комиссия сервиса за покупку, базисные пункты (100 = 1%)
 	FeeProBP        int64
@@ -184,18 +180,8 @@ func Load() (*Config, error) {
 		return env(key, def)
 	}
 	c.OAuthGoogle = mode("OAUTH_GOOGLE", c.GoogleClientID != "")
-	c.OAuthApple = mode("OAUTH_APPLE", c.AppleClientID != "")
-	c.TGGatewayKey, c.SMSHTTPURL, c.SMSHTTPToken = env("TELEGRAM_GATEWAY_TOKEN", ""), env("SMS_HTTP_URL", ""), env("SMS_HTTP_TOKEN", "")
-	sms := "sandbox"
-	switch {
-	case c.TGGatewayKey != "":
-		sms = "telegram"
-	case c.SMSHTTPURL != "":
-		sms = "http"
-	case c.Env == "production":
-		sms = "off"
-	}
-	c.SMSProvider = env("SMS_PROVIDER", sms)
+	// Apple ID пока выключен (нужен платный аккаунт разработчика); включится сам, когда появятся ключи
+	c.OAuthApple = env("OAUTH_APPLE", map[bool]string{true: "on", false: "off"}[c.AppleClientID != ""])
 	c.TelegramSandbox = envBool("TELEGRAM_SANDBOX", c.TelegramToken == "" && c.Env != "production")
 	c.SecureCookies = strings.HasPrefix(c.PublicURL, "https://")
 	return c, c.validate()
@@ -256,21 +242,8 @@ func (c *Config) validate() error {
 	if c.OAuthApple == "on" && (c.AppleClientID == "" || c.AppleTeamID == "" || c.AppleKeyID == "" || c.ApplePrivateKey == "") {
 		return errors.New("OAUTH_APPLE=on требует APPLE_CLIENT_ID, APPLE_TEAM_ID, APPLE_KEY_ID и APPLE_PRIVATE_KEY(_FILE)")
 	}
-	switch c.SMSProvider {
-	case "sandbox", "off":
-	case "telegram":
-		if c.TGGatewayKey == "" {
-			return errors.New("SMS_PROVIDER=telegram требует TELEGRAM_GATEWAY_TOKEN")
-		}
-	case "http":
-		if c.SMSHTTPURL == "" {
-			return errors.New("SMS_PROVIDER=http требует SMS_HTTP_URL")
-		}
-	default:
-		return fmt.Errorf("неизвестный SMS_PROVIDER=%q (sandbox|telegram|http|off)", c.SMSProvider)
-	}
-	if c.Env == "production" && (c.SMSProvider == "sandbox" || c.TelegramSandbox) {
-		return errors.New("тестовые SMS и тестовый Telegram недоступны при APP_ENV=production")
+	if c.Env == "production" && c.TelegramSandbox {
+		return errors.New("тестовый Telegram недоступен при APP_ENV=production")
 	}
 	if c.Env == "production" && (c.KYCDocs == "sandbox" || c.MSIMode == "sandbox") {
 		return errors.New("тестовая проверка личности (KYC_DOCS/MSI_MODE=sandbox) недоступна при APP_ENV=production")

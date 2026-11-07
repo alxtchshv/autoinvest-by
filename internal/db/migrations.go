@@ -313,4 +313,17 @@ CREATE TABLE phone_codes (
 );
 CREATE INDEX phone_codes_phone ON phone_codes(phone, purpose);
 `,
+	// ключи входа (passkeys): Face ID, Touch ID, отпечаток, Windows Hello — второй фактор и подтверждение опасных действий
+	`
+CREATE TABLE passkeys (
+	id           INTEGER PRIMARY KEY,
+	user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+	cred_id      TEXT NOT NULL UNIQUE,
+	name         TEXT NOT NULL DEFAULT '',
+	data         TEXT NOT NULL,
+	created_at   INTEGER NOT NULL,
+	last_used_at INTEGER
+);
+CREATE INDEX passkeys_user ON passkeys(user_id);
+`,
 }

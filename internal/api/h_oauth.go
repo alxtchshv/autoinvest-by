@@ -208,13 +208,10 @@ func (s *Server) oauthFinish(w http.ResponseWriter, r *http.Request, provider, s
 		fail("blocked")
 		return
 	}
-	if err := s.setSession(w, r, u, u.TOTPEnabled); err != nil {
+	// вход через Google второй защиты не требует: у Google своя проверка (опасные действия всё равно подтверждаются)
+	if err := s.setSession(w, r, u, false); err != nil {
 		s.Log.Error("oauth session", "err", err)
 		fail("provider")
-		return
-	}
-	if u.TOTPEnabled {
-		http.Redirect(w, r, "/login?step=2fa&next="+url.QueryEscape(st.Next), http.StatusFound)
 		return
 	}
 	s.afterLogin(r, u)
@@ -273,7 +270,7 @@ func (s *Server) identities(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, map[string]any{"identities": list, "has_password": u.HasPassword, "phone": u.Phone, "phone_verified": u.PhoneVerified,
-		"providers": map[string]string{"google": s.Cfg.OAuthGoogle, "apple": s.Cfg.OAuthApple, "phone": s.Cfg.SMSProvider}})
+		"providers": map[string]string{"google": s.Cfg.OAuthGoogle, "apple": s.Cfg.OAuthApple, "phone": s.phoneMode()}})
 }
 
 // unlinkIdentity — отвязать Google/Apple, если остаётся другой способ войти.

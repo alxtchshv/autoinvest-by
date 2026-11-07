@@ -73,7 +73,7 @@ export default function Home() {
                 <Money k={v.value_kop} size="xl" />
                 {hasMoney && (
                   <div className="row g12 wrap mt8 small">
-                    <span className={`badge ${v.pnl_kop >= 0 ? "badge-up" : "badge-down"}`}>{hidden ? "•••" : `${byn(v.pnl_kop, { sign: true })} · ${pct(v.pnl_pct)}`}</span>
+                    <span className={`num ${v.pnl_kop >= 0 ? "up" : "down"}`} style={{ fontWeight: 600 }}>{hidden ? "•••" : `${byn(v.pnl_kop, { sign: true })} · ${pct(v.pnl_pct)}`}</span>
                     <span className="muted">за всё время</span>
                     <span className="muted">·</span>
                     <span>за сутки <Change k={v.day_pnl_kop} /></span>
@@ -189,7 +189,7 @@ export default function Home() {
                     <span className="spark">{a.kind !== "stable" && <AssetSpark symbol={a.symbol} width={64} height={24} />}</span>
                     <span className="end num small">
                       <div style={{ fontWeight: 600 }}>{q ? price(q.price_byn) : "—"}</div>
-                      {q && <Change v={q.change_24h} />}
+                      {q && a.kind !== "stable" && <Change v={q.change_24h} />}
                     </span>
                   </Link>
                 );

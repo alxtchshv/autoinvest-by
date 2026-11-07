@@ -1,11 +1,15 @@
 package api
 
 import (
+	"context"
+	"fmt"
+	"time"
 	"net/http"
 	"net/url"
 	"strings"
 	"testing"
 
+	"autoinvest/internal/auth"
 	"autoinvest/internal/store"
 )
 
@@ -88,48 +92,58 @@ func TestOAuthSandboxLoginAndLink(t *testing.T) {
 	}
 }
 
-func TestPhoneVerifyAndLogin(t *testing.T) {
-	srv, s := newServer(t)
-	s.Cfg.SMSProvider = "sandbox"
+func TestWithdrawNeedsAuthenticatorCode(t *testing.T) {
+	srv, _ := newServer(t)
 	c := newClient(t, srv.URL)
-	c.register("phone@test.by")
-	anon := newClient(t, srv.URL)
-	// неподтверждённый номер для входа не годится
-	if code := anon.do("POST", "/api/v1/auth/phone/code", map[string]any{"phone": "+375 29 111-22-33"}, nil); code != 422 {
-		t.Fatalf("неподтверждённый номер: %d", code)
+	c.register("totp@test.by")
+	c.bindCard()
+	id := c.plan("A", true)
+	var setup struct{ Secret string }
+	c.do("POST", "/api/v1/me/2fa/setup", map[string]any{}, &setup)
+	if code := c.do("POST", "/api/v1/me/2fa/enable", map[string]any{"code": auth.TOTPCode(setup.Secret, time.Now())}, nil); code != 200 {
+		t.Fatalf("2fa enable: %d", code)
 	}
-	var sent struct {
+	var e apiErr
+	if code := c.do("POST", fmt.Sprintf("/api/v1/plans/%d/withdraw", id), map[string]any{"all": true, "password": "parol2026"}, &e); code != 422 || e.Field != "code" {
+		t.Fatalf("вывод без кода: %d %+v", code, e)
+	}
+	if code := c.do("POST", fmt.Sprintf("/api/v1/plans/%d/withdraw", id), map[string]any{"all": true, "password": "parol2026", "code": auth.TOTPCode(setup.Secret, time.Now().Add(30*time.Second))}, nil); code != 200 {
+		t.Fatalf("вывод с кодом: %d", code)
+	}
+	// вход по паролю теперь требует второй шаг
+	c2 := newClient(t, srv.URL)
+	var r struct {
+		MFARequired bool            `json:"mfa_required"`
+		MFA         map[string]bool `json:"mfa"`
+	}
+	c2.do("POST", "/api/v1/auth/login", map[string]any{"email": "totp@test.by", "password": "parol2026"}, &r)
+	if !r.MFARequired || !r.MFA["totp"] || r.MFA["passkey"] {
+		t.Fatalf("второй шаг: %+v", r)
+	}
+}
+
+func TestRegisterNeedsEmailCode(t *testing.T) {
+	srv, s := newServer(t)
+	c := newClient(t, srv.URL)
+	var st struct {
 		TestCode string `json:"test_code"`
 	}
-	if code := c.do("POST", "/api/v1/me/phone/code", map[string]any{"phone": "80291112233"}, &sent); code != 200 || len(sent.TestCode) != 6 {
-		t.Fatalf("код подтверждения: %d %+v", code, sent)
+	c.do("POST", "/api/v1/auth/register/start", map[string]any{"name": "Анна", "email": "anna@test.by", "password": "parol2026", "accept_offer": true, "accept_privacy": true}, &st)
+	if _, err := s.St.UserByEmail(context.Background(), "anna@test.by"); err == nil {
+		t.Fatal("аккаунт создан до ввода кода")
 	}
-	if code := c.do("POST", "/api/v1/me/phone/verify", map[string]any{"phone": "+375291112233", "code": "000000"}, nil); code != 422 && sent.TestCode != "000000" {
-		t.Fatalf("неверный код принят: %d", code)
+	wrong := "000000"
+	if st.TestCode == wrong {
+		wrong = "111111"
 	}
-	if code := c.do("POST", "/api/v1/me/phone/verify", map[string]any{"phone": "+375291112233", "code": sent.TestCode}, nil); code != 200 {
-		t.Fatalf("подтверждение: %d", code)
+	if code := c.do("POST", "/api/v1/auth/register/confirm", map[string]any{"email": "anna@test.by", "code": wrong}, nil); code != 422 {
+		t.Fatalf("неверный код: %d", code)
 	}
-	// вход по коду
-	if code := anon.do("POST", "/api/v1/auth/phone/code", map[string]any{"phone": "+375291112233"}, &sent); code != 200 {
-		t.Fatalf("код входа: %d", code)
+	var me struct{ User *store.User }
+	if code := c.do("POST", "/api/v1/auth/register/confirm", map[string]any{"email": "anna@test.by", "code": st.TestCode}, &me); code != 201 || me.User == nil || !me.User.EmailVerified {
+		t.Fatalf("подтверждение: %d %+v", code, me.User)
 	}
-	if code := anon.do("POST", "/api/v1/auth/phone/login", map[string]any{"phone": "+375291112233", "code": sent.TestCode}, nil); code != 200 {
-		t.Fatalf("вход по коду: %d", code)
-	}
-	// код одноразовый
-	again := newClient(t, srv.URL)
-	if code := again.do("POST", "/api/v1/auth/phone/login", map[string]any{"phone": "+375291112233", "code": sent.TestCode}, nil); code == 200 {
-		t.Fatal("код сработал дважды")
-	}
-	// вход по номеру и паролю
-	if code := again.do("POST", "/api/v1/auth/login", map[string]any{"email": "+375 (29) 111-22-33", "password": "parol2026"}, nil); code != 200 {
-		t.Fatalf("вход по номеру и паролю: %d", code)
-	}
-	// второй аккаунт не может подтвердить тот же номер
-	c2 := newClient(t, srv.URL)
-	c2.register("phone2@test.by")
-	if code := c2.do("POST", "/api/v1/me/phone/code", map[string]any{"phone": "+375291112233"}, nil); code != 422 {
-		t.Fatalf("чужой номер: %d", code)
+	if code := c.do("POST", "/api/v1/auth/register/start", map[string]any{"name": "Анна", "email": "anna@test.by", "password": "parol2026", "accept_offer": true, "accept_privacy": true}, nil); code != 422 {
+		t.Fatalf("повторная регистрация той же почты: %d", code)
 	}
 }

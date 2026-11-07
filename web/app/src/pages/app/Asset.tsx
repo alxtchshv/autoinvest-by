@@ -33,7 +33,7 @@ export default function AssetPage() {
               <h1>{a.name} <span className="muted" style={{ fontWeight: 500 }}>{a.symbol}</span></h1>
               <div className="row g12 wrap">
                 <span className="asset-price num">{q ? price(q.price_byn) : "—"}</span>
-                {q && <Change v={q.change_24h} />}
+                {q && a.kind !== "stable" && <Change v={q.change_24h} />}
                 {q && <span className="small muted">{price(q.price_usd, "$")} · {q.source}</span>}
               </div>
             </div>

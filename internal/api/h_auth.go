@@ -17,6 +17,9 @@ import (
 
 var phoneRe = regexp.MustCompile(`^\+375(25|29|33|44)\d{7}$`)
 
+// intlPhoneRe — номер любой страны (Telegram может быть привязан не к белорусскому номеру).
+var intlPhoneRe = regexp.MustCompile(`^\+[1-9]\d{9,14}$`)
+
 func normPhone(p string) string {
 	var b strings.Builder
 	for _, r := range p {
@@ -58,7 +61,7 @@ func (s *Server) getConfig(w http.ResponseWriter, r *http.Request) {
 		"free_plan_limit": c.FreePlanLimit,
 		"pro_plan_limit":  c.ProPlanLimit,
 		"require_kyc":     c.RequireKYC,
-		"auth":            map[string]string{"google": c.OAuthGoogle, "apple": c.OAuthApple, "phone": c.SMSProvider},
+		"auth":            map[string]string{"google": c.OAuthGoogle, "apple": c.OAuthApple, "phone": s.phoneMode()},
 		"assets":          market.Catalog,
 		"strategies":      market.Strategies,
 		"version":         s.Version,
@@ -87,21 +90,26 @@ func (s *Server) clearSession(w http.ResponseWriter) {
 	http.SetCookie(w, &http.Cookie{Name: sessionCookie, Value: "", Path: "/", HttpOnly: true, Secure: s.Cfg.SecureCookies, SameSite: http.SameSiteLaxMode, MaxAge: -1})
 }
 
-func (s *Server) register(w http.ResponseWriter, r *http.Request) {
+// Регистрация в два шага: register/start проверяет данные и отправляет 6-значный код на почту,
+// register/confirm принимает код и только тогда создаёт аккаунт (почта сразу подтверждена).
+type signupDraft struct {
+	Name string `json:"name"`
+	Hash string `json:"hash"`
+	Ref  string `json:"ref"`
+}
+
+const signupCodeTTL = 15 * 60
+
+func (s *Server) registerStart(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Name     string `json:"name"`
 		Email    string `json:"email"`
-		Phone    string `json:"phone"`
 		Password string `json:"password"`
 		Ref      string `json:"ref"`
 		Offer    bool   `json:"accept_offer"`   // публичная оферта и уведомление о рисках
 		Privacy  bool   `json:"accept_privacy"` // согласие на обработку персональных данных (Закон № 99-З)
 	}
 	if !readJSON(w, r, &in) {
-		return
-	}
-	if !s.limiter.Allow("reg:"+clientIP(r), 10, time.Hour) {
-		writeErr(w, http.StatusTooManyRequests, "Слишком много регистраций с вашего адреса. Попробуйте позже")
 		return
 	}
 	in.Name = strings.TrimSpace(in.Name)
@@ -112,11 +120,6 @@ func (s *Server) register(w http.ResponseWriter, r *http.Request) {
 	}
 	if !validEmail(in.Email) {
 		writeFieldErr(w, "email", "Проверьте адрес почты")
-		return
-	}
-	phone := normPhone(in.Phone)
-	if phone != "" && !phoneRe.MatchString(phone) {
-		writeFieldErr(w, "phone", "Номер в формате +375 (29) 123-45-67")
 		return
 	}
 	if err := auth.ValidatePassword(in.Password); err != nil {
@@ -132,18 +135,72 @@ func (s *Server) register(w http.ResponseWriter, r *http.Request) {
 		writeFieldErr(w, "accept_privacy", "Без согласия на обработку персональных данных мы не можем открыть аккаунт")
 		return
 	}
+	if _, err := s.St.UserByEmail(r.Context(), in.Email); err == nil {
+		writeFieldErr(w, "email", store.ErrEmailTaken.Error()+". Войдите или восстановите пароль")
+		return
+	}
+	if !s.limiter.Allow("reg:"+clientIP(r), 10, time.Hour) || !s.limiter.Allow("reg-mail:"+in.Email, 3, 10*time.Minute) {
+		writeErr(w, http.StatusTooManyRequests, "Слишком много попыток. Подождите 10 минут")
+		return
+	}
+	mailer := s.N.Mailer()
+	if !mailer.Enabled() && s.Cfg.Env == "production" {
+		writeErr(w, http.StatusServiceUnavailable, "Регистрация временно недоступна: почта не настроена")
+		return
+	}
 	hash, err := auth.HashPassword(in.Password)
 	if err != nil {
 		s.internal(w, r, err)
 		return
 	}
+	raw, _ := json.Marshal(signupDraft{Name: in.Name, Hash: hash, Ref: in.Ref})
+	s.St.SetKV(r.Context(), "signup:"+in.Email, string(raw))
+	code := randomDigits(6)
+	if err := s.St.CreatePhoneCode(r.Context(), in.Email, "signup", 0, code, signupCodeTTL); err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	resp := map[string]any{"ok": true, "email": in.Email}
+	if mailer.Enabled() {
+		go mailer.Send(in.Email, "Код для регистрации в AutoInvest: "+code,
+			"Здравствуйте, "+in.Name+"!\n\nВаш код для регистрации в AutoInvest: "+code+"\n\nКод действует 15 минут. Если вы не регистрировались, просто проигнорируйте письмо.")
+	} else {
+		resp["test_code"] = code // почта не настроена (стенд, разработка) — показываем код на экране
+		s.Log.Info("регистрация: код (почта не настроена)", "email", in.Email, "code", code)
+	}
+	writeJSON(w, 200, resp)
+}
+
+func (s *Server) registerConfirm(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Email string `json:"email"`
+		Code  string `json:"code"`
+	}
+	if !readJSON(w, r, &in) {
+		return
+	}
+	email := strings.ToLower(strings.TrimSpace(in.Email))
+	if !s.limiter.Allow("reg-confirm:"+clientIP(r), 30, 15*time.Minute) {
+		writeErr(w, http.StatusTooManyRequests, "Слишком много попыток. Подождите 15 минут")
+		return
+	}
+	if _, err := s.St.UsePhoneCode(r.Context(), email, "signup", strings.TrimSpace(in.Code)); err != nil {
+		writeFieldErr(w, "code", err.Error())
+		return
+	}
+	var d signupDraft
+	if raw := s.St.GetKV(r.Context(), "signup:"+email); raw == "" || json.Unmarshal([]byte(raw), &d) != nil {
+		writeErr(w, http.StatusBadRequest, "Заявка на регистрацию устарела — заполните форму ещё раз")
+		return
+	}
+	s.St.SetKV(r.Context(), "signup:"+email, "")
 	var refBy *int64
-	if in.Ref != "" {
-		if ref, err := s.St.UserByReferral(r.Context(), in.Ref); err == nil {
+	if d.Ref != "" {
+		if ref, err := s.St.UserByReferral(r.Context(), d.Ref); err == nil {
 			refBy = &ref.ID
 		}
 	}
-	u, err := s.St.CreateUser(r.Context(), store.NewUser{Email: in.Email, Phone: phone, Name: in.Name, PasswordHash: hash, ReferredBy: refBy})
+	u, err := s.St.CreateUser(r.Context(), store.NewUser{Email: email, Name: d.Name, PasswordHash: d.Hash, ReferredBy: refBy, EmailVerified: true})
 	if errors.Is(err, store.ErrEmailTaken) {
 		writeFieldErr(w, "email", err.Error())
 		return
@@ -158,9 +215,8 @@ func (s *Server) register(w http.ResponseWriter, r *http.Request) {
 			s.Log.Error("consent", "user", u.ID, "err", err)
 		}
 	}
-	s.sendVerification(r, u)
 	s.N.Send(r.Context(), u.ID, notify.Message{Kind: "welcome", Title: "Добро пожаловать в AutoInvest",
-		Body: "Создайте первую копилку: выберите сумму, расписание и стратегию — дальше всё произойдёт само.", Link: "/app/plans/new"})
+		Body: "Создайте первую копилку: выберите сумму, расписание и план — дальше всё произойдёт само.", Link: "/app/plans/new"})
 	if err := s.setSession(w, r, u, false); err != nil {
 		s.internal(w, r, err)
 		return
@@ -194,7 +250,7 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	}
 	var u *store.User
 	var err error
-	if !strings.Contains(email, "@") && phoneRe.MatchString(normPhone(email)) {
+	if p := normPhone(email); !strings.Contains(email, "@") && (phoneRe.MatchString(p) || intlPhoneRe.MatchString(p)) {
 		u, err = s.St.UserByPhone(r.Context(), normPhone(email))
 	} else {
 		u, err = s.St.UserByEmail(r.Context(), email)
@@ -214,12 +270,18 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusForbidden, "Аккаунт заблокирован. Напишите в поддержку: support@autoinvest.by")
 		return
 	}
-	if err := s.setSession(w, r, u, u.TOTPEnabled); err != nil {
+	s.finishLogin(w, r, u)
+}
+
+// finishLogin — сеанс после первого фактора; при включённой второй защите сеанс ждёт кода или Face ID / отпечатка.
+func (s *Server) finishLogin(w http.ResponseWriter, r *http.Request, u *store.User) {
+	mfa := s.needsSecondFactor(r, u)
+	if err := s.setSession(w, r, u, mfa); err != nil {
 		s.internal(w, r, err)
 		return
 	}
-	if u.TOTPEnabled {
-		writeJSON(w, 200, map[string]any{"mfa_required": true})
+	if mfa {
+		writeJSON(w, 200, map[string]any{"mfa_required": true, "mfa": s.mfaMethods(r, u)})
 		return
 	}
 	s.afterLogin(r, u)
@@ -298,7 +360,11 @@ func (s *Server) me(w http.ResponseWriter, r *http.Request) {
 	u := currentUser(r)
 	if u == nil {
 		if sess := currentSession(r); sess != nil && sess.MFAPending {
-			writeJSON(w, 200, map[string]any{"user": nil, "mfa_required": true})
+			resp := map[string]any{"user": nil, "mfa_required": true}
+			if pu, err := s.St.UserByID(r.Context(), sess.UserID); err == nil {
+				resp["mfa"] = s.mfaMethods(r, pu)
+			}
+			writeJSON(w, 200, resp)
 			return
 		}
 		writeJSON(w, 200, map[string]any{"user": nil})
@@ -314,6 +380,7 @@ func (s *Server) mePayload(r *http.Request, u *store.User) map[string]any {
 	return map[string]any{
 		"user": u, "is_pro": u.IsPro(), "unread": unread, "cards": len(cards), "plans": plans,
 		"telegram_linked": u.TelegramChatID != nil,
+		"passkeys":        s.St.CountPasskeys(r.Context(), u.ID),
 	}
 }
 

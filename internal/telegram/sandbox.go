@@ -17,9 +17,10 @@ import (
 )
 
 type SandboxButton struct {
-	Text string `json:"text"`
-	Data string `json:"data,omitempty"`
-	URL  string `json:"url,omitempty"`
+	Text    string `json:"text"`
+	Data    string `json:"data,omitempty"`
+	URL     string `json:"url,omitempty"`
+	Contact bool   `json:"contact,omitempty"` // кнопка нижней клавиатуры «Поделиться номером»
 }
 
 type SandboxMsg struct {
@@ -41,11 +42,12 @@ type Sandbox struct {
 	msgID   int64
 	rev     int64
 	chats   map[int64][]*SandboxMsg
-	changed chan struct{} // закрывается и пересоздаётся при каждом новом апдейте
+	replyKB map[int64][]SandboxButton // нижняя клавиатура чата (reply keyboard)
+	changed chan struct{}             // закрывается и пересоздаётся при каждом новом апдейте
 }
 
 func NewSandbox(username string) *Sandbox {
-	return &Sandbox{Username: username, chats: map[int64][]*SandboxMsg{}, changed: make(chan struct{})}
+	return &Sandbox{Username: username, chats: map[int64][]*SandboxMsg{}, replyKB: map[int64][]SandboxButton{}, changed: make(chan struct{})}
 }
 
 // Transport — http.RoundTripper, через который бот «ходит» в песочницу, не выходя в сеть.
@@ -114,6 +116,36 @@ func (s *Sandbox) UserPress(chat, msgID int64, data, username string) bool {
 	upd, _ := json.Marshal(map[string]any{"update_id": s.updID, "callback_query": map[string]any{
 		"id": "cb" + itoa(s.updID), "data": data, "from": map[string]any{"id": chat, "username": username},
 		"message": map[string]any{"message_id": msgID, "chat": map[string]any{"id": chat, "type": "private"}}}})
+	s.queue = append(s.queue, upd)
+	s.notify()
+	return true
+}
+
+// Keyboard — текущая нижняя клавиатура чата.
+func (s *Sandbox) Keyboard(chat int64) []SandboxButton {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.replyKB[chat]
+}
+
+// UserSharesContact — пользователь нажал «Поделиться номером» (работает, только если бот показал такую кнопку).
+func (s *Sandbox) UserSharesContact(chat int64, username, phone string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	ok := false
+	for _, b := range s.replyKB[chat] {
+		ok = ok || b.Contact
+	}
+	if !ok {
+		return false
+	}
+	m := s.addMsg(chat, false, "📱 "+phone, false, nil)
+	delete(s.replyKB, chat)
+	s.updID++
+	upd, _ := json.Marshal(map[string]any{"update_id": s.updID, "message": map[string]any{
+		"message_id": m.ID, "chat": map[string]any{"id": chat, "type": "private"},
+		"from":    map[string]any{"id": chat, "username": username},
+		"contact": map[string]any{"phone_number": phone, "user_id": chat}}})
 	s.queue = append(s.queue, upd)
 	s.notify()
 	return true
@@ -204,6 +236,11 @@ func (s *Sandbox) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case "sendMessage":
 		s.mu.Lock()
 		m := s.addMsg(in.ChatID, true, in.Text, in.ParseMode == "HTML", parseKeyboard(in.ReplyMarkup))
+		if kb, remove := parseReplyKeyboard(in.ReplyMarkup); remove {
+			delete(s.replyKB, in.ChatID)
+		} else if kb != nil {
+			s.replyKB[in.ChatID] = kb
+		}
 		s.notify()
 		s.mu.Unlock()
 		reply(map[string]any{"message_id": m.ID, "chat": map[string]any{"id": in.ChatID}, "text": in.Text})
@@ -247,6 +284,30 @@ func parseKeyboard(raw json.RawMessage) [][]SandboxButton {
 		out = append(out, r)
 	}
 	return out
+}
+
+// parseReplyKeyboard — нижняя клавиатура (keyboard) или команда её убрать (remove_keyboard).
+func parseReplyKeyboard(raw json.RawMessage) ([]SandboxButton, bool) {
+	var kb struct {
+		Keyboard [][]struct {
+			Text    string `json:"text"`
+			Contact bool   `json:"request_contact"`
+		} `json:"keyboard"`
+		Remove bool `json:"remove_keyboard"`
+	}
+	if len(bytes.TrimSpace(raw)) == 0 || json.Unmarshal(raw, &kb) != nil {
+		return nil, false
+	}
+	if kb.Remove {
+		return nil, true
+	}
+	var out []SandboxButton
+	for _, row := range kb.Keyboard {
+		for _, b := range row {
+			out = append(out, SandboxButton{Text: b.Text, Contact: b.Contact})
+		}
+	}
+	return out, false
 }
 
 func itoa(n int64) string {

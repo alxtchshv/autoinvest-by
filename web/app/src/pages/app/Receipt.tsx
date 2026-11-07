@@ -1,4 +1,4 @@
-import { Link, useParams } from "react-router-dom";
+import { Link, useLocation, useParams } from "react-router-dom";
 import { ArrowLeft, Printer } from "lucide-react";
 import { api } from "../../lib/api";
 import { brandLabel, byn, dateTime, kop, price, qty } from "../../lib/format";
@@ -10,6 +10,9 @@ const TRIGGER: Record<string, string> = { schedule: "по расписанию",
 
 export default function Receipt() {
   const { id } = useParams();
+  const back = (useLocation().state || {}) as { from?: string; fromLabel?: string };
+  const backTo = back.from?.startsWith("/app/") ? back.from : "/app/history";
+  const backLabel = back.from?.startsWith("/app/") && back.fromLabel ? back.fromLabel : "Операции";
   const { data, error, loading, reload } = useLoad(() => api.get<{ operation: Order }>(`/operations/${id}`), [id]);
   useTitle("Чек операции");
   if (loading && !data) return <PageLoader />;
@@ -19,7 +22,7 @@ export default function Receipt() {
   const net = o.amount_kop - o.fee_kop;
   return (
     <div className="receipt">
-      <Link to="/app/history" className="back no-print"><ArrowLeft />Операции</Link>
+      <Link to={backTo} className="back no-print"><ArrowLeft />{backLabel}</Link>
       <section className="sheet">
         <div className="sheet-body stack g16">
           <div className="row between">

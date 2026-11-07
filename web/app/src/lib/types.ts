@@ -26,7 +26,7 @@ export type User = {
   referral_code: string; risk_profile: string; kyc_status: "none" | "pending" | "approved" | "rejected"; telegram_username: string;
   notify_email: boolean; notify_telegram: boolean; notify_market: boolean; created_at: number; last_login_at: number | null; onboarded_at: number | null;
 };
-export type Me = { user: User | null; is_pro?: boolean; unread?: number; cards?: number; plans?: number; telegram_linked?: boolean; mfa_required?: boolean };
+export type Me = { user: User | null; is_pro?: boolean; unread?: number; cards?: number; plans?: number; telegram_linked?: boolean; mfa_required?: boolean; mfa?: { totp: boolean; passkey: boolean }; passkeys?: number };
 
 export type Card = { id: number; provider: string; brand: string; last4: string; bin: string; mask: string; exp_month: number; exp_year: number; holder: string; issuer: string; is_default: boolean; status: string; created_at: number };
 export type AuditEvent = { action: string; details: string; ip: string; user_agent: string; created_at: number };

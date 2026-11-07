@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useLocation } from "react-router-dom";
 import { ArrowDownToLine, ArrowLeft, FlaskConical, Pause, Pencil, Play, Plus, Settings2, SlidersHorizontal, Trash2 } from "lucide-react";
 import { api, idemKey } from "../../lib/api";
 import { byn, date, dateTime, kop, parseKop, pct, planName, price, qty, scheduleText, when } from "../../lib/format";
@@ -7,19 +7,21 @@ import { useLoad, useSubmit, useTitle } from "../../lib/hooks";
 import { useSession, useUserEvent } from "../../lib/session";
 import type { Alloc, Card, Order, Plan, Snapshot } from "../../lib/types";
 import { AssetIcon, Button, Change, Field, Input, LoadError, Modal, MoreMenu, Money, Notice, OrderStatus, PageLoader, PLAN_ICONS, PlanIcon, PlanStatus, Segmented, Switch, useToast } from "../../components/ui";
-import { PlanMark, RISK_TEXT } from "../../components/plans";
 import { DatePicker } from "../../components/DatePicker";
 import { ValueChart } from "../../components/charts";
+import { useConfirm } from "../../components/Confirm";
 import { SchedulePicker, StrategyPicker, type Schedule } from "./PlanNew";
 import { AllocBar } from "./Plans";
 
 const PERIODS = [{ value: "7d", label: "Неделя" }, { value: "1m", label: "Месяц" }, { value: "3m", label: "3 мес" }, { value: "all", label: "Всё" }] as const;
 
 export function OperationRow({ o, showPlan }: { o: Order; showPlan?: boolean }) {
+  const loc = useLocation();
   const buy = o.side === "buy";
   const title = buy ? (o.trigger === "schedule" ? "Пополнение по расписанию" : o.trigger === "dip" ? "Докупка на просадке" : "Пополнение") : o.trigger === "close" ? "Закрытие копилки" : "Вывод на карту";
   return (
-    <Link to={`/app/history/${o.id}`} className="list-row">
+    // запоминаем, откуда открыли чек: «назад» вернёт в копилку, если пришли из неё
+    <Link to={`/app/history/${o.id}`} state={{ from: loc.pathname, fromLabel: showPlan ? "Операции" : o.plan_name }} className="list-row">
       <span className={`plan-ico`} style={{ width: 38, height: 38, borderRadius: 10, background: buy ? "var(--brand-soft)" : "var(--line-2)", color: buy ? "var(--brand-ink)" : "var(--ink-2)" }}>
         {buy ? <Plus size={18} /> : <ArrowDownToLine size={18} />}
       </span>
@@ -145,8 +147,7 @@ export default function PlanDetail() {
             ) : <div className="muted">{closed ? "Копилка закрыта" : p.frequency === "manual" ? "Пополнения только вручную" : "Копилка на паузе"}</div>}
             {p.frequency !== "manual" && !closed && <div className="pd-run pd-month"><span className="muted">В месяц около</span><Money k={p.monthly_kop} /></div>}
             <div className="pd-plan">
-              {st ? <PlanMark id={st.id} size={32} /> : <span className="plan-mark" />}
-              <div className="grow"><div className="pd-plan-name">{st ? planName(st.name) : "Свой состав"}</div><div className={`pt-risk r${p.risk}`}>{RISK_TEXT[p.risk]}</div></div>
+              <div className="grow pd-plan-name">{st ? planName(st.name) : "Свой состав"}</div>
               {!closed && <button className="link-btn" onClick={() => setModal("mix")}>Сменить</button>}
             </div>
             {p.dip_enabled && <div className="small muted">Докупка при падении на {p.dip_threshold_bp / 100}% за сутки</div>}
@@ -233,7 +234,7 @@ function WithdrawModal({ plan, open, onClose, onDone }: MP) {
   const toast = useToast();
   const [all, setAll] = useState(false);
   const [amount, setAmount] = useState("");
-  const [password, setPassword] = useState("");
+  const conf = useConfirm();
   const [key] = useState(idemKey);
   const s = useSubmit();
   const k = parseKop(amount);
@@ -243,7 +244,7 @@ function WithdrawModal({ plan, open, onClose, onDone }: MP) {
       <form className="stack g16" onSubmit={async (e) => {
         e.preventDefault();
         try {
-          const r = await s.submit(() => api.post<{ order: Order }>(`/plans/${plan.id}/withdraw`, { amount_kop: all ? 0 : k, all, password, idempotency_key: key + (all ? "all" : amount) }));
+          const r = await s.submit(() => api.post<{ order: Order }>(`/plans/${plan.id}/withdraw`, { amount_kop: all ? 0 : k, all, ...conf.body, idempotency_key: key + (all ? "all" : amount) }));
           toast(r?.order.status === "filled" ? `${byn(r.order.amount_kop)} отправлено на карту` : "Активы проданы, выплата будет проведена в течение 1–3 рабочих дней");
           onDone();
           onClose();
@@ -256,12 +257,10 @@ function WithdrawModal({ plan, open, onClose, onDone }: MP) {
             <div className="input-affix"><input className="input amount-input" inputMode="decimal" maxLength={10} value={amount} onChange={(e) => setAmount(e.target.value)} autoFocus aria-label="Сумма" placeholder="0" /><span className="affix" style={{ fontSize: 18 }}>⃅</span></div>
           </Field>
         )}
-        <Field label="Пароль от аккаунта" error={s.fieldError("password")} hint="Подтверждаем вывод, чтобы деньги не увёл тот, кто получил доступ к вашему устройству">
-          <Input type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} />
-        </Field>
+        {conf.view(s.fieldError, "Подтверждаем вывод, чтобы деньги не увёл тот, кто получил доступ к вашему устройству")}
         {s.error && !s.field && <Notice kind="error">{s.error}</Notice>}
         <div className="small muted">Деньги придут на карту •• {plan.card?.last4 || "основную"}. Цена продажи — биржевая минус спред партнёра. Пополнения по расписанию продолжатся.</div>
-        <Button type="submit" variant="primary" size="lg" block busy={s.busy} disabled={(!all && !isFinite(k)) || !password}>{all ? `Вывести всё ≈ ${byn(v)}` : `Вывести ${isFinite(k) ? byn(k) : ""}`}</Button>
+        <Button type="submit" variant="primary" size="lg" block busy={s.busy} disabled={(!all && !isFinite(k)) || !conf.ready}>{all ? `Вывести всё ≈ ${byn(v)}` : `Вывести ${isFinite(k) ? byn(k) : ""}`}</Button>
       </form>
     </Modal>
   );
@@ -352,18 +351,18 @@ function MixModal({ plan, open, onClose, onDone, isPro }: MP & { isPro: boolean 
 function CloseModal({ plan, open, onClose, onDone }: MP) {
   const toast = useToast();
   const s = useSubmit();
-  const [password, setPassword] = useState("");
+  const conf = useConfirm();
   const v = plan.valuation.value_kop;
   return (
     <Modal open={open} onClose={onClose} title="Закрыть копилку?">
       <div className="stack g16">
         <p>{v > 0 ? <>Все активы будут проданы по текущей цене, около <b>{byn(v)}</b> придёт на карту •• {plan.card?.last4 || "основную"}. Пополнения прекратятся.</> : "Пополнения прекратятся, копилка переместится в закрытые."}</p>
-        {v > 0 && <Field label="Пароль от аккаунта" error={s.fieldError("password")}><Input type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} /></Field>}
+        {v > 0 && conf.view(s.fieldError)}
         {s.error && !s.field && <Notice kind="error">{s.error}</Notice>}
         <div className="row g8" style={{ justifyContent: "flex-end" }}>
           <Button onClick={onClose}>Оставить</Button>
           <Button variant="danger" busy={s.busy} onClick={async () => {
-            try { await s.submit(() => api.post(`/plans/${plan.id}/close`, { password })); toast("Копилка закрыта"); onDone(); } catch { /* */ }
+            try { await s.submit(() => api.post(`/plans/${plan.id}/close`, conf.body)); toast("Копилка закрыта"); onDone(); } catch { /* */ }
           }}>Закрыть копилку</Button>
         </div>
       </div>

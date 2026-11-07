@@ -100,8 +100,14 @@ func (c *client) do(method, path string, body any, out any) int {
 }
 
 func (c *client) register(email string) {
-	if code := c.do("POST", "/api/v1/auth/register", map[string]any{"name": "Иван Петров", "email": email, "password": "parol2026", "accept_offer": true, "accept_privacy": true}, nil); code != 201 {
-		c.t.Fatalf("register %s: %d", email, code)
+	var st struct {
+		TestCode string `json:"test_code"`
+	}
+	if code := c.do("POST", "/api/v1/auth/register/start", map[string]any{"name": "Иван Петров", "email": email, "password": "parol2026", "accept_offer": true, "accept_privacy": true}, &st); code != 200 || st.TestCode == "" {
+		c.t.Fatalf("register start %s: %d", email, code)
+	}
+	if code := c.do("POST", "/api/v1/auth/register/confirm", map[string]any{"email": email, "code": st.TestCode}, nil); code != 201 {
+		c.t.Fatalf("register confirm %s: %d", email, code)
 	}
 }
 

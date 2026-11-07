@@ -23,7 +23,7 @@ func TestRegistrationNeedsBothSeparateConsentsAndStoresThem(t *testing.T) {
 		}
 		delete(body, missing)
 		var e apiErr
-		if code := c.do("POST", "/api/v1/auth/register", body, &e); code != 422 || e.Field != missing {
+		if code := c.do("POST", "/api/v1/auth/register/start", body, &e); code != 422 || e.Field != missing {
 			t.Fatalf("without %s: code %d field %q", missing, code, e.Field)
 		}
 	}

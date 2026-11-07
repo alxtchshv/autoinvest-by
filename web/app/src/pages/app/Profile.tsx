@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
-import { Link, NavLink, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { NavLink, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import QRCode from "qrcode";
-import { ChevronRight, Copy, Download, KeyRound, LogOut, Mail, Monitor, Smartphone } from "lucide-react";
+import { Check, Copy, Download, Fingerprint, LogOut, Mail, Monitor, Smartphone } from "lucide-react";
 import { api } from "../../lib/api";
 import { ago, byn, date, dateTime, phoneFmt } from "../../lib/format";
 import { useLoad, useSubmit, useTitle } from "../../lib/hooks";
@@ -10,11 +10,13 @@ import type { AuditEvent, Consent, KYC, Me, Payment, Session } from "../../lib/t
 import { Button, Field, Input, LoadError, Modal, Notice, PageLoader, Switch, useToast } from "../../components/ui";
 import { DatePicker, isoDate } from "../../components/DatePicker";
 import { VerificationPanel } from "./Verify";
+import { useConfirm } from "../../components/Confirm";
+import { addPasskey, deviceName, passkeyError, passkeysSupported } from "../../lib/webauthn";
 import { AppleMark, GoogleMark } from "../../components/SocialLogin";
 import { LogoutButton } from "../../components/layout";
 
 const TABS = [
-  ["personal", "Личные данные"], ["verification", "Верификация"], ["security", "Безопасность"], ["password", "Пароль"], ["journal", "Журнал действий"],
+  ["personal", "Личные данные"], ["verification", "Верификация"], ["security", "Безопасность"],
   ["notifications", "Уведомления"], ["billing", "Тариф"], ["referral", "Пригласить друга"], ["risk", "Риск-профиль"],
 ] as const;
 
@@ -34,7 +36,6 @@ export default function Profile() {
           {tab === "verification" && <Verification />}
           {tab === "security" && <Security />}
           {tab === "password" && <PasswordTab />}
-          {tab === "journal" && <Journal />}
           {tab === "notifications" && <NotifySettings />}
           {tab === "billing" && <Billing />}
           {tab === "referral" && <Referral />}
@@ -50,16 +51,14 @@ function Personal() {
   const toast = useToast();
   const u = me!.user!;
   const [name, setName] = useState(u.name);
-  const [phone, setPhone] = useState(u.phone);
   const s = useSubmit();
   const [delOpen, setDelOpen] = useState(false);
   return (
     <>
-      <form className="sheet" onSubmit={async (e) => { e.preventDefault(); try { const r = await s.submit(() => api.patch<Me>("/me", { name, phone })); if (r) { setMe(r); toast("Сохранено"); } } catch { /* */ } }}>
+      <form className="sheet" onSubmit={async (e) => { e.preventDefault(); try { const r = await s.submit(() => api.patch<Me>("/me", { name })); if (r) { setMe(r); toast("Сохранено"); } } catch { /* */ } }}>
         <div className="sheet-head"><h2>Личные данные</h2></div>
         <div className="sheet-body stack g16" style={{ maxWidth: 520 }}>
           <Field label="Имя" error={s.fieldError("name")}><Input value={name} onChange={(e) => setName(e.target.value)} /></Field>
-          <Field label="Телефон" error={s.fieldError("phone")}><Input type="tel" value={phone} placeholder="+375 29 123-45-67" onChange={(e) => setPhone(e.target.value)} /></Field>
           <Field label="Почта" hint={u.email_verified ? "Подтверждена" : undefined}>
             <Input value={u.email} disabled />
           </Field>
@@ -67,6 +66,7 @@ function Personal() {
           <div><Button type="submit" variant="primary" busy={s.busy}>Сохранить</Button></div>
         </div>
       </form>
+      <Journal />
       <section className="sheet">
         <div className="sheet-head"><h2>Аккаунт</h2></div>
         <div className="sheet-body stack g12 small">
@@ -98,13 +98,13 @@ function ResendVerification() {
 function DeleteAccount({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { reload } = useSession();
   const nav = useNavigate();
-  const [p, setP] = useState("");
+  const conf = useConfirm();
   const s = useSubmit();
   return (
     <Modal open={open} onClose={onClose} title="Удалить аккаунт?">
-      <form className="stack g16" onSubmit={async (e) => { e.preventDefault(); try { await s.submit(() => api.post("/me/delete", { password: p })); await reload(); nav("/"); } catch { /* */ } }}>
+      <form className="stack g16" onSubmit={async (e) => { e.preventDefault(); try { await s.submit(() => api.post("/me/delete", conf.body)); await reload(); nav("/"); } catch { /* */ } }}>
         <p>Копилки будут закрыты, карты отвязаны, персональные данные удалены. История операций сохранится обезличенно, как требует закон. Действие нельзя отменить.</p>
-        <Field label="Пароль для подтверждения" error={s.fieldError("password")}><Input type="password" value={p} onChange={(e) => setP(e.target.value)} /></Field>
+        {conf.view(s.fieldError)}
         {s.error && !s.field && <Notice kind="error">{s.error}</Notice>}
         <div className="row g8" style={{ justifyContent: "flex-end" }}><Button onClick={onClose}>Отмена</Button><Button type="submit" variant="danger" busy={s.busy}>Удалить навсегда</Button></div>
       </form>
@@ -210,16 +210,10 @@ function Security() {
   };
   return (
     <>
-      <Link to="/app/profile/password" className="sheet sec-link">
-        <span className="sec-ic"><KeyRound /></span>
-        <span className="grow"><b>Пароль</b><span className="muted">Сменить пароль от аккаунта</span></span>
-        <ChevronRight className="sec-go" />
-      </Link>
-
       <LoginMethods />
 
       <section className="sheet">
-        <div className="sheet-head"><h2>Двухфакторная защита</h2>{u.totp_enabled ? <span className="badge badge-up">Включена</span> : <span className="badge">Выключена</span>}</div>
+        <div className="sheet-head"><h2>Код из Google Authenticator</h2>{u.totp_enabled ? <span className="badge badge-up">Включён</span> : <span className="badge">Выключен</span>}</div>
         <div className="sheet-body stack g16">
           {codes ? (
             <>
@@ -228,7 +222,7 @@ function Security() {
               <div><Button onClick={() => { navigator.clipboard?.writeText(codes.join("\n")); toast("Коды скопированы"); }} icon={<Copy />}>Скопировать</Button> <Button variant="ghost" onClick={() => setCodes(null)}>Готово</Button></div>
             </>
           ) : u.totp_enabled ? (
-            <div className="row between wrap g12"><span className="muted">При входе мы спрашиваем код из приложения-аутентификатора.</span><Button variant="danger" size="sm" onClick={() => setDisable(true)}>Отключить</Button></div>
+            <div className="row between wrap g12"><span className="muted">Спрашиваем код при входе и перед выводом денег, закрытием копилки и сменой пароля.</span><Button variant="danger" size="sm" onClick={() => setDisable(true)}>Отключить</Button></div>
           ) : tfa ? (
             <div className="row g24 wrap" style={{ alignItems: "flex-start" }}>
               <img className="qr" src={tfa.qr} alt="QR-код для приложения-аутентификатора" />
@@ -247,6 +241,8 @@ function Security() {
           )}
         </div>
       </section>
+
+      <PasskeysSection />
 
       <section className="sheet">
         <div className="sheet-head">
@@ -332,33 +328,37 @@ function Security() {
 }
 
 function PasswordTab() {
+  return <section className="sheet"><div className="sheet-head"><h2>Пароль</h2></div><div className="sheet-body"><PasswordForm /></div></section>;
+}
+
+function PasswordForm({ onDone }: { onDone?: () => void }) {
   const toast = useToast();
   const { me, reload } = useSession();
   const hasPw = me?.user?.has_password !== false;
-  const [pw, setPw] = useState({ current: "", next: "", again: "" });
+  const [pw, setPw] = useState({ current: "", next: "", again: "", code: "" });
+  const totp = !!me?.user?.totp_enabled;
   const s = useSubmit();
   const mismatch = !!pw.again && pw.next !== pw.again;
   return (
-    <form className="sheet" onSubmit={async (e) => {
+    <form className="stack g16" onSubmit={async (e) => {
       e.preventDefault();
       if (pw.next !== pw.again) return;
       try {
-        await s.submit(() => api.post("/me/password", { current: pw.current, new: pw.next }));
-        setPw({ current: "", next: "", again: "" });
+        await s.submit(() => api.post("/me/password", { current: pw.current, new: pw.next, code: pw.code }));
+        setPw({ current: "", next: "", again: "", code: "" });
         toast(hasPw ? "Пароль изменён, другие устройства вышли из аккаунта" : "Пароль задан — теперь можно входить и по почте");
         reload();
+        onDone?.();
       } catch { /* */ }
     }}>
-      <div className="sheet-head"><h2>{hasPw ? "Смена пароля" : "Задайте пароль"}</h2></div>
-      <div className="sheet-body stack g16" style={{ maxWidth: 480 }}>
-        {!hasPw && <Notice kind="info">Вы входите через Google, Apple или по телефону. Пароль нужен для вывода денег и как запасной способ входа.</Notice>}
-        {hasPw && <Field label="Текущий пароль" error={s.fieldError("current")}><Input type="password" autoComplete="current-password" value={pw.current} onChange={(e) => setPw({ ...pw, current: e.target.value })} /></Field>}
-        <Field label="Новый пароль" error={s.fieldError("new")} hint="Не короче 8 символов, буквы и цифры"><Input type="password" autoComplete="new-password" value={pw.next} onChange={(e) => setPw({ ...pw, next: e.target.value })} /></Field>
-        <Field label="Новый пароль ещё раз" error={mismatch ? "Пароли не совпадают" : undefined}><Input type="password" autoComplete="new-password" value={pw.again} onChange={(e) => setPw({ ...pw, again: e.target.value })} /></Field>
-        {s.error && !s.field && <Notice kind="error">{s.error}</Notice>}
-        {hasPw && <Notice kind="plain">После смены пароля все другие устройства выйдут из аккаунта.</Notice>}
-        <div><Button type="submit" variant="primary" busy={s.busy} disabled={(hasPw && !pw.current) || !pw.next || pw.next !== pw.again}>{hasPw ? "Сменить пароль" : "Задать пароль"}</Button></div>
-      </div>
+      {!hasPw && <Notice kind="info">Вы входите через Google или по телефону. Пароль нужен для вывода денег и как запасной способ входа.</Notice>}
+      {hasPw && <Field label="Текущий пароль" error={s.fieldError("current")}><Input type="password" autoComplete="current-password" value={pw.current} onChange={(e) => setPw({ ...pw, current: e.target.value })} /></Field>}
+      <Field label="Новый пароль" error={s.fieldError("new")} hint="Не короче 8 символов, буквы и цифры"><Input type="password" autoComplete="new-password" value={pw.next} onChange={(e) => setPw({ ...pw, next: e.target.value })} /></Field>
+      <Field label="Новый пароль ещё раз" error={mismatch ? "Пароли не совпадают" : undefined}><Input type="password" autoComplete="new-password" value={pw.again} onChange={(e) => setPw({ ...pw, again: e.target.value })} /></Field>
+      {totp && <Field label="Код из Google Authenticator" error={s.fieldError("code")}><Input inputMode="numeric" autoComplete="one-time-code" maxLength={12} value={pw.code} onChange={(e) => setPw({ ...pw, code: e.target.value.replace(/\s/g, "") })} /></Field>}
+      {s.error && !s.field && <Notice kind="error">{s.error}</Notice>}
+      {hasPw && <p className="small muted" style={{ margin: 0 }}>После смены пароля все другие устройства выйдут из аккаунта.</p>}
+      <div className="row g8" style={{ justifyContent: "flex-end" }}><Button type="submit" variant="primary" busy={s.busy} disabled={(hasPw && !pw.current) || !pw.next || pw.next !== pw.again}>{hasPw ? "Изменить пароль" : "Задать пароль"}</Button></div>
     </form>
   );
 }
@@ -372,7 +372,18 @@ function LoginMethods() {
   const { reload: reloadMe } = useSession();
   const [sp, setSp] = useSearchParams();
   const d = useLoad(() => api.get<IdentResp>("/me/identities"), []);
-  const [phoneOpen, setPhoneOpen] = useState(false);
+  useEffect(() => { const f = () => d.reload(); window.addEventListener("focus", f); return () => window.removeEventListener("focus", f); }, [d]);
+  const [pwOpen, setPwOpen] = useState(false);
+  const { me } = useSession();
+  const nav = useNavigate();
+  // номер подтверждается кнопкой «Поделиться номером» в нашем боте — без SMS
+  const askPhone = async () => {
+    try {
+      const r = await api.post<{ open: string }>("/me/phone/telegram");
+      toast("Бот прислал кнопку «Поделиться номером»");
+      if (r.open.startsWith("/")) nav(r.open); else window.open(r.open, "_blank", "noopener");
+    } catch (e: any) { toast(e.message, "error"); }
+  };
   useEffect(() => {
     const ok = sp.get("oauth"), bad = sp.get("oauth_error");
     if (ok === "linked") toast("Способ входа привязан");
@@ -393,10 +404,15 @@ function LoginMethods() {
     <section className="sheet">
       <div className="sheet-head"><h2>Способы входа</h2></div>
       <div className="list">
-        <Row icon={<Mail />} title="Почта и пароль" sub={x.has_password ? "Пароль задан" : "Пароль не задан"} action={<Link className="btn btn-secondary btn-sm" to="/app/profile/password">{x.has_password ? "Сменить" : "Задать"}</Link>} />
+        <Row icon={<Mail />} title="Почта и пароль" sub={x.has_password ? "Пароль задан" : "Пароль не задан"} action={<Button size="sm" onClick={() => setPwOpen(true)}>{x.has_password ? "Изменить" : "Задать"}</Button>} />
         {x.providers.phone !== "off" && (
-          <Row icon={<Smartphone />} title="Телефон и код" sub={x.phone_verified ? `${phoneFmt(x.phone)} · подтверждён` : x.phone ? `${phoneFmt(x.phone)} · не подтверждён` : "Номер не указан"}
-            action={<Button size="sm" variant={x.phone_verified ? "secondary" : "primary"} onClick={() => setPhoneOpen(true)}>{x.phone_verified ? "Сменить" : "Подтвердить"}</Button>} />
+          <Row icon={<Smartphone />} title="Телефон и код в Telegram"
+            sub={x.phone_verified ? `${phoneFmt(x.phone)} · коды для входа приходят в Telegram` : me?.telegram_linked ? "Подтвердите номер кнопкой в боте" : "Сначала подключите Telegram — коды будут приходить туда"}
+            action={x.phone_verified
+              ? <Button size="sm" variant="ghost" onClick={async () => { try { await api.del("/me/phone"); d.reload(); reloadMe(); toast("Номер отвязан"); } catch (e: any) { toast(e.message, "error"); } }}>Отвязать</Button>
+              : me?.telegram_linked
+                ? <Button size="sm" variant="primary" onClick={askPhone}>Подтвердить</Button>
+                : <Button size="sm" onClick={() => nav("/app/profile/notifications")}>Подключить Telegram</Button>} />
         )}
         {(["google", "apple"] as const).filter((p) => x.providers[p] !== "off").map((p) => {
           const i = has(p);
@@ -406,36 +422,13 @@ function LoginMethods() {
           );
         })}
       </div>
-      <PhoneModal open={phoneOpen} initial={x.phone} onClose={() => setPhoneOpen(false)} onDone={() => { setPhoneOpen(false); d.reload(); reloadMe(); toast("Номер подтверждён — теперь можно входить по коду"); }} />
+      <Modal open={pwOpen} onClose={() => setPwOpen(false)} title={x.has_password ? "Изменить пароль" : "Задать пароль"}>
+        <PasswordForm onDone={() => { setPwOpen(false); d.reload(); }} />
+      </Modal>
     </section>
   );
 }
 
-function PhoneModal({ open, initial, onClose, onDone }: { open: boolean; initial: string; onClose: () => void; onDone: () => void }) {
-  const [phone, setPhone] = useState(initial);
-  const [sent, setSent] = useState<null | { test_code?: string; via?: string }>(null);
-  const [code, setCode] = useState("");
-  const s = useSubmit();
-  useEffect(() => { if (open) { setPhone(phoneFmt(initial)); setSent(null); setCode(""); s.reset(); } /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [open]);
-  return (
-    <Modal open={open} onClose={onClose} title="Подтверждение номера">
-      <form className="stack g16" onSubmit={async (e) => {
-        e.preventDefault();
-        try {
-          if (!sent) setSent((await s.submit(() => api.post<{ test_code?: string; via?: string }>("/me/phone/code", { phone }))) || null);
-          else { await s.submit(() => api.post("/me/phone/verify", { phone, code })); onDone(); }
-        } catch { /* */ }
-      }}>
-        <p className="muted" style={{ margin: 0 }}>После подтверждения можно входить по номеру и коду, без пароля.</p>
-        <Field label="Номер телефона" error={s.fieldError("phone")}><Input type="tel" value={phone} disabled={!!sent} onChange={(e) => setPhone(e.target.value)} placeholder="+375 (29) 123-45-67" autoFocus /></Field>
-        {sent && <Field label={sent.via === "telegram" ? "Код из Telegram" : "Код из SMS"} error={s.fieldError("code")}><Input inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))} autoFocus /></Field>}
-        {sent?.test_code && <Notice kind="warn">Тестовый режим: SMS не отправляется, код — <b className="num">{sent.test_code}</b></Notice>}
-        {s.error && !s.field && <Notice kind="error">{s.error}</Notice>}
-        <div className="row g8" style={{ justifyContent: "flex-end" }}><Button onClick={onClose}>Отмена</Button><Button type="submit" variant="primary" busy={s.busy}>{sent ? "Подтвердить" : "Получить код"}</Button></div>
-      </form>
-    </Modal>
-  );
-}
 
 // Журнал действий не показываем списком: выгружаем файлом, только когда пользователь сам попросит.
 function Journal() {
@@ -454,6 +447,44 @@ function Journal() {
         </div>
       </div>
       <div className="sheet-foot small muted">Скачивание тоже попадает в журнал. Не узнаёте какое-то действие — смените пароль и завершите чужие сеансы во вкладке «Безопасность».</div>
+    </section>
+  );
+}
+
+// Face ID / Touch ID / отпечаток (WebAuthn): второй шаг входа и подтверждение опасных действий одним касанием.
+function PasskeysSection() {
+  const toast = useToast();
+  const { reload: reloadMe } = useSession();
+  const d = useLoad(() => api.get<{ passkeys: { id: number; name: string; created_at: number; last_used_at: number | null }[] }>("/me/passkeys"), []);
+  const [busy, setBusy] = useState(false);
+  const supported = passkeysSupported();
+  const add = async () => {
+    setBusy(true);
+    try { await addPasskey(deviceName()); d.reload(); reloadMe(); toast("Устройство добавлено — теперь можно подтверждать Face ID или отпечатком"); }
+    catch (e: any) { toast(passkeyError(e), "error"); }
+    finally { setBusy(false); }
+  };
+  const list = d.data?.passkeys || [];
+  return (
+    <section className="sheet">
+      <div className="sheet-head"><h2>Face ID, Touch ID или отпечаток</h2>{list.length ? <span className="badge badge-up">Включено</span> : <span className="badge">Выключено</span>}</div>
+      <div className="sheet-body stack g12">
+        <span className="muted">Подтверждайте вход и вывод денег касанием — как в банковском приложении. Биометрия остаётся на устройстве, мы храним только ключ.</span>
+        {list.length > 0 && (
+          <div className="list pk-list">
+            {list.map((k) => (
+              <div key={k.id} className="list-row">
+                <span className="sess-ic"><Fingerprint /></span>
+                <div className="grow"><div className="title">{k.name}</div><div className="sub">добавлено {date(k.created_at)}{k.last_used_at ? ` · использовано ${ago(k.last_used_at)}` : ""}</div></div>
+                <Button size="sm" variant="ghost" onClick={async () => { await api.del(`/me/passkeys/${k.id}`); d.reload(); reloadMe(); toast("Устройство удалено"); }}>Удалить</Button>
+              </div>
+            ))}
+          </div>
+        )}
+        {supported
+          ? <div><Button variant={list.length ? "secondary" : "primary"} size="sm" icon={<Fingerprint />} busy={busy} onClick={add}>{list.length ? "Добавить ещё устройство" : "Включить на этом устройстве"}</Button></div>
+          : <Notice kind="info">Этот браузер не поддерживает вход по Face ID и отпечатку. Используйте Google Authenticator.</Notice>}
+      </div>
     </section>
   );
 }
@@ -540,9 +571,9 @@ function Billing() {
   if (loading && !data) return <PageLoader />;
   if (error) return <LoadError error={error} retry={reload} />;
   const d = data!;
-  const buy = async () => {
+  const buy = async (per: "month" | "year" = period) => {
     try {
-      const r = await s.submit(() => api.post<{ code?: string; error?: string }>("/billing/pro", { period }));
+      const r = await s.submit(() => api.post<{ code?: string; error?: string }>("/billing/pro", { period: per }));
       toast(r?.code === "pending" ? r.error! : "Pro подключён");
       reload(); reloadMe();
     } catch (e: any) { toast(e.message, "error"); }
@@ -563,17 +594,29 @@ function Billing() {
             </>
           ) : (
             <>
-              <div className="grid2">
-                <button className="choice" aria-pressed={period === "month"} onClick={() => setPeriod("month")}><b>{byn(d.month_kop)}</b> в месяц</button>
-                <button className="choice" aria-pressed={period === "year"} onClick={() => setPeriod("year")}><b>{byn(d.year_kop)}</b> в год <span className="badge badge-up" style={{ marginLeft: 6 }}>−{Math.round((1 - d.year_kop / (d.month_kop * 12)) * 100)}%</span></button>
+              <div className="tariff-cards">
+                {(["month", "year"] as const).map((per) => {
+                  const price = per === "year" ? d.year_kop : d.month_kop;
+                  const save = Math.round((1 - d.year_kop / (d.month_kop * 12)) * 100);
+                  return (
+                    <div key={per} className={`tariff-card ${per === "year" ? "best" : ""}`}>
+                      <div className="tc-head">
+                        <span className="tc-name">Pro на {per === "year" ? "год" : "месяц"}</span>
+                        {per === "year" && <span className="badge badge-up">−{save}%</span>}
+                      </div>
+                      <div className="tc-price"><b>{byn(price)}</b><span className="muted">{per === "year" ? ` · ${byn(Math.round(d.year_kop / 12))} в месяц` : " в месяц"}</span></div>
+                      <ul className="tc-list">
+                        <li><Check />До {config?.pro_plan_limit} копилок вместо {config?.free_plan_limit}</li>
+                        <li><Check />Свой состав из любых активов</li>
+                        <li><Check />Докупка при падении цены</li>
+                        <li><Check />Комиссия {(config!.fee_pro_bp / 100).toString().replace(".", ",")}% вместо {(config!.fee_free_bp / 100).toString().replace(".", ",")}%</li>
+                        {per === "year" && <li><Check />Платите раз в год — экономия {byn(d.month_kop * 12 - d.year_kop)}</li>}
+                      </ul>
+                      <Button variant={per === "year" ? "primary" : "secondary"} block busy={s.busy && period === per} onClick={() => { setPeriod(per); buy(per); }}>Подключить за {byn(price)}</Button>
+                    </div>
+                  );
+                })}
               </div>
-              <ul className="small" style={{ margin: 0, paddingLeft: 18, lineHeight: 1.8 }}>
-                <li>До {config?.pro_plan_limit} копилок вместо {config?.free_plan_limit}</li>
-                <li>Свой состав копилки из любых активов</li>
-                <li>Докупка при падении цены</li>
-                <li>Комиссия {(config!.fee_pro_bp / 100).toString().replace(".", ",")}% вместо {(config!.fee_free_bp / 100).toString().replace(".", ",")}%</li>
-              </ul>
-              <div><Button variant="primary" busy={s.busy} onClick={buy}>Подключить за {byn(period === "year" ? d.year_kop : d.month_kop)}</Button></div>
               <p className="tiny muted">Списание с основной карты. Отменить автопродление можно в любой момент в этом разделе.</p>
             </>
           )}

@@ -8,7 +8,7 @@ import { useTitle } from "../../lib/hooks";
 import { useSession } from "../../lib/session";
 import { Notice, useToast } from "../../components/ui";
 
-type Btn = { text: string; data?: string; url?: string };
+type Btn = { text: string; data?: string; url?: string; contact?: boolean };
 type Msg = { id: number; rev: number; from_bot: boolean; text: string; html: boolean; buttons?: Btn[][]; at: number };
 
 /** Бот присылает HTML с <b>/<i>; всё остальное показываем как текст. */
@@ -27,6 +27,7 @@ export default function TelegramSandbox() {
   const [sp, setSp] = useSearchParams();
   const [msgs, setMsgs] = useState<Msg[]>([]);
   const [bot, setBot] = useState("");
+  const [kb, setKb] = useState<Btn[]>([]);
   const [text, setText] = useState("");
   const [err, setErr] = useState("");
   const rev = useRef(0);
@@ -39,9 +40,10 @@ export default function TelegramSandbox() {
     const loop = async () => {
       while (!stop) {
         try {
-          const r = await api.get<{ bot: string; messages: Msg[]; rev: number }>(`/telegram/sandbox?after=${rev.current}&wait=${rev.current ? 1 : 0}`);
+          const r = await api.get<{ bot: string; messages: Msg[]; rev: number; keyboard?: Btn[] }>(`/telegram/sandbox?after=${rev.current}&wait=${rev.current ? 1 : 0}`);
           if (stop) return;
           setBot(r.bot);
+          setKb(r.keyboard || []);
           setErr("");
           if (r.messages.length) {
             setMsgs((old) => {
@@ -113,8 +115,21 @@ export default function TelegramSandbox() {
           ))}
           <div ref={end} />
         </div>
+        {kb.length > 0 && (
+          <div className="tg-replykb">
+            {kb.map((b, i) => (
+              <button key={i} type="button" onClick={async () => {
+                if (!b.contact) { send(undefined, b.text); return; }
+                // в настоящем Telegram номер берётся из аккаунта; здесь — спрашиваем, какой номер «у этого Telegram»
+                const phone = window.prompt("Тестовый Telegram: номер этого аккаунта", "+375 29 123-45-67");
+                if (!phone) return;
+                try { await api.post("/telegram/sandbox/contact", { phone }); } catch (x: any) { toast(x.message, "error"); }
+              }}>{b.text}</button>
+            ))}
+          </div>
+        )}
         <div className="tg-quick">
-          {["/menu", "/balance", "/plans", "/history", "/support"].map((c) => <button key={c} type="button" onClick={() => send(undefined, c)}>{c}</button>)}
+          {["/menu", "/balance", "/plans", "/history", "/phone", "/support"].map((c) => <button key={c} type="button" onClick={() => send(undefined, c)}>{c}</button>)}
         </div>
         <form className="tg-input" onSubmit={send}>
           <input value={text} onChange={(e) => setText(e.target.value)} placeholder="Сообщение" maxLength={4000} aria-label="Сообщение боту" />

@@ -148,10 +148,8 @@ export function PlanChip({ s, selected, onSelect }: { s: Strategy; selected?: bo
     <div className={`plan-chip ${selected ? "on" : ""}`}>
       <button type="button" className="pc-main" aria-pressed={selected} onClick={onSelect}>
         <span className="pc-radio" aria-hidden>{selected && <Check />}</span>
-        <span className="pc-text">
-          <span className="pc-name">{s.name}</span>
-          <span className={`pt-risk r${s.risk}`}>{RISK_TEXT[s.risk]}</span>
-        </span>
+        <span className="pc-name">{s.name}</span>
+        <span className={`pt-risk r${s.risk}`}>{RISK_TEXT[s.risk]}</span>
       </button>
       <PlanHint s={s} />
     </div>

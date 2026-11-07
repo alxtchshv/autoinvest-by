@@ -532,11 +532,12 @@ func (s *Server) withdrawPlan(w http.ResponseWriter, r *http.Request) {
 		All       bool   `json:"all"`
 		Key       string `json:"idempotency_key"`
 		Password  string `json:"password"`
+		Code      string `json:"code"`
 	}
 	if !readJSON(w, r, &in) {
 		return
 	}
-	if !s.confirmPassword(w, r, in.Password) {
+	if !s.confirmAction(w, r, in.Password, in.Code) {
 		return
 	}
 	if !in.All && in.AmountKop <= 0 {
@@ -557,20 +558,6 @@ func (s *Server) withdrawPlan(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"order": o})
 }
 
-// confirmPassword — повторная проверка пароля перед выводом денег (защита при украденной сессии).
-func (s *Server) confirmPassword(w http.ResponseWriter, r *http.Request, password string) bool {
-	u := currentUser(r)
-	if !s.limiter.Allow("confirm:"+strconv.FormatInt(u.ID, 10), 10, 15*time.Minute) {
-		writeErr(w, http.StatusTooManyRequests, "Слишком много попыток. Подождите 15 минут")
-		return false
-	}
-	if msg := passwordGate(u, password); msg != "" {
-		writeFieldErr(w, "password", msg)
-		return false
-	}
-	return true
-}
-
 func (s *Server) closePlan(w http.ResponseWriter, r *http.Request) {
 	u := currentUser(r)
 	p := s.loadPlan(w, r)
@@ -579,9 +566,10 @@ func (s *Server) closePlan(w http.ResponseWriter, r *http.Request) {
 	}
 	var in struct {
 		Password string `json:"password"`
+		Code     string `json:"code"`
 	}
 	readJSON(w, r, &in)
-	if p.Status != "closed" && s.En.Value(p.Positions).ValueKop > 0 && !s.confirmPassword(w, r, in.Password) {
+	if p.Status != "closed" && s.En.Value(p.Positions).ValueKop > 0 && !s.confirmAction(w, r, in.Password, in.Code) {
 		return
 	}
 	order, err := s.En.ClosePlan(r.Context(), u.ID, p.ID)

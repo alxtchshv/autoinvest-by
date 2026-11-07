@@ -173,6 +173,7 @@ func (b *Bot) Check(ctx context.Context) error {
 		{"command": "plans", "description": "Мои копилки"},
 		{"command": "history", "description": "Последние операции"},
 		{"command": "support", "description": "Написать в поддержку"},
+		{"command": "phone", "description": "Подтвердить номер для входа"},
 		{"command": "stop", "description": "Отключить бота от аккаунта"},
 	}}, nil)
 	return nil
@@ -194,6 +195,10 @@ type tgMessage struct {
 	} `json:"chat"`
 	From    tgUser     `json:"from"`
 	ReplyTo *tgMessage `json:"reply_to_message"`
+	Contact *struct {
+		PhoneNumber string `json:"phone_number"`
+		UserID      int64  `json:"user_id"`
+	} `json:"contact"`
 }
 
 type update struct {
@@ -242,6 +247,8 @@ func (b *Bot) Handle(ctx context.Context, u update) {
 	case u.Callback != nil && u.Callback.Message != nil:
 		b.call(ctx, "answerCallbackQuery", map[string]any{"callback_query_id": u.Callback.ID}, nil)
 		b.press(ctx, u.Callback.Message.Chat.ID, u.Callback.Message.MessageID, u.Callback.Data)
+	case u.Message != nil && u.Message.Chat.Type == "private" && u.Message.Contact != nil:
+		b.onContact(ctx, u.Message)
 	case u.Message != nil && u.Message.Chat.Type == "private":
 		b.handle(ctx, u.Message.Chat.ID, u.Message.From.Username, strings.TrimSpace(u.Message.Text))
 	case u.Message != nil && b.SupportChatID != 0 && u.Message.Chat.ID == b.SupportChatID:
@@ -293,6 +300,10 @@ func (b *Bot) handle(ctx context.Context, chat int64, username, text string) {
 	case "/history":
 		if u, ok := b.user(ctx, chat); ok {
 			b.send(chat, b.historyText(ctx, u), kb(row(cb("Меню", "m"))))
+		}
+	case "/phone":
+		if _, ok := b.user(ctx, chat); ok {
+			b.AskPhone(chat)
 		}
 	case "/support":
 		if _, ok := b.user(ctx, chat); ok {
@@ -564,6 +575,52 @@ func (b *Bot) staffReply(ctx context.Context, m *tgMessage) {
 			Link: fmt.Sprintf("/app/support/%d", t.ID), Email: true})
 	}
 	b.send(m.Chat.ID, fmt.Sprintf("Ответ по обращению #%d отправлен клиенту.", t.ID), nil)
+}
+
+// ---------------------------------------------------------------- номер телефона
+
+// AskPhone — кнопка «Поделиться номером»: Telegram отдаёт номер, к которому привязан аккаунт, — подтверждение без SMS.
+func (b *Bot) AskPhone(chat int64) error {
+	return b.send(chat, "Чтобы входить в AutoInvest по номеру телефона, нажмите кнопку <b>«Поделиться номером»</b> внизу.\n"+
+		"Telegram передаст номер, к которому привязан этот аккаунт. Коды для входа будут приходить сюда.",
+		map[string]any{"keyboard": [][]map[string]any{{{"text": "📱 Поделиться номером", "request_contact": true}}}, "resize_keyboard": true, "one_time_keyboard": true})
+}
+
+func (b *Bot) onContact(ctx context.Context, m *tgMessage) {
+	chat := m.Chat.ID
+	u, ok := b.user(ctx, chat)
+	if !ok {
+		return
+	}
+	removeKB := map[string]any{"remove_keyboard": true}
+	// только свой номер: чужой контакт из записной книжки не подтверждает владение
+	if m.Contact.UserID != m.From.ID {
+		b.send(chat, "Это чужой контакт. Нажмите кнопку «Поделиться номером» — Telegram отправит ваш собственный номер.", nil)
+		return
+	}
+	digits := strings.Map(func(r rune) rune {
+		if r >= '0' && r <= '9' {
+			return r
+		}
+		return -1
+	}, m.Contact.PhoneNumber)
+	if len(digits) < 10 || len(digits) > 15 {
+		b.send(chat, "Не получилось прочитать номер. Попробуйте ещё раз: /phone", removeKB)
+		return
+	}
+	phone := "+" + digits
+	if err := b.St.SetVerifiedPhone(ctx, u.ID, phone); err != nil {
+		if errors.Is(err, store.ErrPhoneTaken) {
+			b.send(chat, "Этот номер уже подтверждён в другом аккаунте AutoInvest.", removeKB)
+			return
+		}
+		b.Log.Error("telegram: номер", "err", err)
+		b.send(chat, "Не удалось сохранить номер, попробуйте позже.", removeKB)
+		return
+	}
+	b.St.Audit(ctx, u.ID, u.ID, "security.phone_verified", "telegram", "")
+	b.send(chat, "Номер <b>"+phone+"</b> подтверждён. Теперь можно входить по номеру — код придёт сюда, в Telegram.", removeKB)
+	b.send(chat, "Что посмотрим?", b.mainMenu())
 }
 
 // ---------------------------------------------------------------- привязка

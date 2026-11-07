@@ -1,7 +1,9 @@
 package api
 
-// Вход по номеру телефона: одноразовый код (SMS, Telegram Gateway или тестовый режим) и подтверждение номера в профиле.
-// Войти по номеру можно только если номер подтверждён кодом: неподтверждённый номер при регистрации мог указать кто угодно.
+// Телефон через Telegram (без SMS и без оплаты за сообщения):
+//   - номер подтверждается кнопкой «Поделиться номером» в нашем боте: Telegram передаёт номер, к которому привязан аккаунт;
+//   - код для входа по номеру бот присылает в этот же чат.
+// Поэтому сначала нужно подключить Telegram, потом — телефон.
 
 import (
 	"crypto/rand"
@@ -11,8 +13,6 @@ import (
 	"net/http"
 	"time"
 
-	"autoinvest/internal/notify"
-	"autoinvest/internal/sms"
 	"autoinvest/internal/store"
 )
 
@@ -27,61 +27,24 @@ func randomDigits(n int) string {
 	return string(b)
 }
 
-// smsSender — провайдер из настроек (создаётся один раз).
-func (s *Server) smsSender() sms.Sender {
-	s.smsOnce.Do(func() {
-		if s.SMS != nil {
-			return
-		}
-		switch s.Cfg.SMSProvider {
-		case "telegram":
-			s.SMS = &sms.TelegramGateway{Token: s.Cfg.TGGatewayKey}
-		case "http":
-			s.SMS = &sms.HTTPSender{URL: s.Cfg.SMSHTTPURL, Token: s.Cfg.SMSHTTPToken}
-		case "sandbox":
-			s.SMS = sms.NewSandbox(s.Log)
-		}
-	})
-	return s.SMS
-}
-
-// sendPhoneCode — общая часть: лимиты, код, отправка. testCode непустой только в тестовом режиме.
-func (s *Server) sendPhoneCode(w http.ResponseWriter, r *http.Request, phone, purpose string, uid int64) (testCode string, ok bool) {
-	snd := s.smsSender()
-	if snd == nil || s.Cfg.SMSProvider == "off" {
-		writeErr(w, http.StatusServiceUnavailable, "Вход по телефону пока не подключён")
-		return "", false
+// phoneMode — "telegram", если бот работает (настоящий или тестовый), иначе "off".
+func (s *Server) phoneMode() string {
+	if s.Bot == nil {
+		return "off"
 	}
-	if !s.limiter.Allow("sms:"+phone, 3, 10*time.Minute) || !s.limiter.Allow("sms-ip:"+clientIP(r), 10, time.Hour) {
-		writeErr(w, http.StatusTooManyRequests, "Слишком много кодов. Подождите 10 минут")
-		return "", false
-	}
-	code := randomDigits(6)
-	if err := s.St.CreatePhoneCode(r.Context(), phone, purpose, uid, code, phoneCodeTTL); err != nil {
-		s.internal(w, r, err)
-		return "", false
-	}
-	if err := snd.SendCode(r.Context(), phone, code, fmt.Sprintf("AutoInvest: код %s. Никому его не сообщайте.", code)); err != nil {
-		s.Log.Error("sms", "provider", snd.Name(), "err", err)
-		writeErr(w, http.StatusBadGateway, "Не удалось отправить код. Попробуйте через минуту")
-		return "", false
-	}
-	if snd.Name() == "sandbox" {
-		testCode = code
-	}
-	return testCode, true
+	return "telegram"
 }
 
 func (s *Server) phoneFromBody(w http.ResponseWriter, raw string) (string, bool) {
 	p := normPhone(raw)
-	if !phoneRe.MatchString(p) {
+	if !phoneRe.MatchString(p) && !intlPhoneRe.MatchString(p) {
 		writeFieldErr(w, "phone", "Номер в формате +375 (29) 123-45-67")
 		return "", false
 	}
 	return p, true
 }
 
-// phoneLoginCode — POST /auth/phone/code {phone}
+// phoneLoginCode — POST /auth/phone/code {phone}: код приходит в Telegram, привязанный к аккаунту с этим номером.
 func (s *Server) phoneLoginCode(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Phone string `json:"phone"`
@@ -93,20 +56,43 @@ func (s *Server) phoneLoginCode(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if s.Bot == nil {
+		writeErr(w, http.StatusServiceUnavailable, "Вход по телефону пока не подключён")
+		return
+	}
+	if !s.limiter.Allow("tgcode:"+phone, 3, 10*time.Minute) || !s.limiter.Allow("tgcode-ip:"+clientIP(r), 10, time.Hour) {
+		writeErr(w, http.StatusTooManyRequests, "Слишком много кодов. Подождите 10 минут")
+		return
+	}
 	u, err := s.St.UserByPhone(r.Context(), phone)
 	if errors.Is(err, store.ErrNotFound) {
-		writeFieldErr(w, "phone", "Этот номер не подтверждён ни в одном аккаунте. Войдите по почте и подтвердите номер в профиле")
+		writeFieldErr(w, "phone", "Этот номер не подтверждён ни в одном аккаунте. Войдите по почте и подключите телефон в профиле")
 		return
 	}
 	if err != nil {
 		s.internal(w, r, err)
 		return
 	}
-	test, ok := s.sendPhoneCode(w, r, phone, "login", u.ID)
-	if !ok {
+	if u.TelegramChatID == nil {
+		writeFieldErr(w, "phone", "К аккаунту не подключён Telegram — войдите по почте")
 		return
 	}
-	writeJSON(w, 200, map[string]any{"ok": true, "via": s.Cfg.SMSProvider, "test_code": test})
+	code := randomDigits(6)
+	if err := s.St.CreatePhoneCode(r.Context(), phone, "login", u.ID, code, phoneCodeTTL); err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	text := fmt.Sprintf("Код для входа в AutoInvest: <b>%s</b>\nДействует 10 минут. Никому его не сообщайте.\nЕсли это не вы — просто проигнорируйте сообщение.", code)
+	if err := s.Bot.Send(*u.TelegramChatID, text); err != nil {
+		s.Log.Error("telegram: код входа", "err", err)
+		writeErr(w, http.StatusBadGateway, "Не удалось отправить код в Telegram. Попробуйте через минуту")
+		return
+	}
+	resp := map[string]any{"ok": true, "via": "telegram"}
+	if s.TG != nil {
+		resp["test_code"] = code // тестовый Telegram: дублируем код на экране
+	}
+	writeJSON(w, 200, resp)
 }
 
 // phoneLogin — POST /auth/phone/login {phone, code}
@@ -140,70 +126,43 @@ func (s *Server) phoneLogin(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusForbidden, "Аккаунт заблокирован. Напишите в поддержку: support@autoinvest.by")
 		return
 	}
-	if err := s.setSession(w, r, u, u.TOTPEnabled); err != nil {
-		s.internal(w, r, err)
-		return
-	}
-	if u.TOTPEnabled {
-		writeJSON(w, 200, map[string]any{"mfa_required": true})
-		return
-	}
-	s.afterLogin(r, u)
-	writeJSON(w, 200, s.mePayload(r, u))
+	s.finishLogin(w, r, u)
 }
 
-// phoneVerifyCode — POST /me/phone/code {phone}: код для подтверждения номера в профиле.
-func (s *Server) phoneVerifyCode(w http.ResponseWriter, r *http.Request) {
+// phoneViaTelegram — POST /me/phone/telegram: бот присылает кнопку «Поделиться номером».
+func (s *Server) phoneViaTelegram(w http.ResponseWriter, r *http.Request) {
 	u := currentUser(r)
-	var in struct {
-		Phone string `json:"phone"`
-	}
-	if !readJSON(w, r, &in) {
+	if s.Bot == nil {
+		writeErr(w, http.StatusServiceUnavailable, "Telegram-бот ещё не подключён")
 		return
 	}
-	phone, ok := s.phoneFromBody(w, in.Phone)
-	if !ok {
+	if u.TelegramChatID == nil {
+		writeJSON(w, http.StatusConflict, apiErr{Error: "Сначала подключите Telegram: Профиль → Уведомления", Code: "telegram_required"})
 		return
 	}
-	if other, err := s.St.UserByPhone(r.Context(), phone); err == nil && other.ID != u.ID {
-		writeFieldErr(w, "phone", store.ErrPhoneTaken.Error())
+	if err := s.Bot.AskPhone(*u.TelegramChatID); err != nil {
+		s.Log.Error("telegram: запрос номера", "err", err)
+		writeErr(w, http.StatusBadGateway, "Не удалось написать в Telegram. Попробуйте через минуту")
 		return
 	}
-	test, ok := s.sendPhoneCode(w, r, phone, "verify", u.ID)
-	if !ok {
-		return
+	resp := map[string]any{"ok": true, "bot": s.Bot.Username}
+	if s.TG != nil {
+		resp["open"] = "/telegram-sandbox"
+	} else {
+		resp["open"] = "https://t.me/" + s.Bot.Username
 	}
-	writeJSON(w, 200, map[string]any{"ok": true, "via": s.Cfg.SMSProvider, "test_code": test})
+	writeJSON(w, 200, resp)
 }
 
-// phoneVerify — POST /me/phone/verify {phone, code}
-func (s *Server) phoneVerify(w http.ResponseWriter, r *http.Request) {
+// unlinkPhone — DELETE /me/phone: отвязать номер (если остаётся другой способ входа).
+func (s *Server) unlinkPhone(w http.ResponseWriter, r *http.Request) {
 	u := currentUser(r)
-	var in struct {
-		Phone string `json:"phone"`
-		Code  string `json:"code"`
-	}
-	if !readJSON(w, r, &in) {
+	list, _ := s.St.Identities(r.Context(), u.ID)
+	if !u.HasPassword && len(list) == 0 {
+		writeErr(w, http.StatusConflict, "Это единственный способ входа. Сначала задайте пароль")
 		return
 	}
-	phone, ok := s.phoneFromBody(w, in.Phone)
-	if !ok {
-		return
-	}
-	uid, err := s.St.UsePhoneCode(r.Context(), phone, "verify", in.Code)
-	if err != nil || uid != u.ID {
-		writeFieldErr(w, "code", store.ErrCodeInvalid.Error())
-		return
-	}
-	if err := s.St.SetVerifiedPhone(r.Context(), u.ID, phone); err != nil {
-		if errors.Is(err, store.ErrPhoneTaken) {
-			writeFieldErr(w, "phone", err.Error())
-			return
-		}
-		s.internal(w, r, err)
-		return
-	}
-	s.St.Audit(r.Context(), u.ID, u.ID, "security.phone_verified", phone[:7]+"•••"+phone[len(phone)-2:], clientIP(r))
-	s.N.Send(r.Context(), u.ID, notify.Message{Kind: "security", Title: "Номер телефона подтверждён", Body: "Теперь можно входить по номеру и коду."})
+	s.St.UpdateUserFields(r.Context(), u.ID, map[string]any{"phone": "", "phone_verified_at": nil})
+	s.St.Audit(r.Context(), u.ID, u.ID, "security.phone_removed", "", clientIP(r))
 	s.identities(w, r)
 }

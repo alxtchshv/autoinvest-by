@@ -39,7 +39,7 @@ export function SocialButtons({ next, compact }: { next?: string; compact?: bool
 export function SocialConsent() {
   return (
     <p className="tiny muted social-consent">
-      Входя через Google или Apple впервые, вы создаёте аккаунт и принимаете <Link to="/legal/offer" target="_blank">оферту</Link>,{" "}
+      Входя через Google впервые, вы создаёте аккаунт и принимаете <Link to="/legal/offer" target="_blank">оферту</Link>,{" "}
       <Link to="/legal/risks" target="_blank">предупреждение о рисках</Link> и даёте <Link to="/legal/privacy" target="_blank">согласие на обработку персональных данных</Link>.
     </p>
   );

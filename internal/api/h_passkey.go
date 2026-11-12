@@ -118,7 +118,9 @@ func (s *Server) loginSendCode(w http.ResponseWriter, r *http.Request) {
 	} else {
 		mailer := s.N.Mailer()
 		if mailer.Enabled() {
-			go mailer.Send(u.Email, "Код для входа в AutoInvest: "+code, "Код для входа в AutoInvest: "+code+"\n\nДействует 10 минут. Если это не вы — смените пароль.")
+			if !s.mailCode(w, resp, u.Email, code, "Код для входа в AutoInvest: "+code, "Код для входа в AutoInvest: "+code+"\n\nДействует 10 минут. Если это не вы — смените пароль.") {
+				return
+			}
 		} else if s.Cfg.Env == "production" {
 			writeErr(w, http.StatusServiceUnavailable, "Почта не настроена — используйте Telegram")
 			return

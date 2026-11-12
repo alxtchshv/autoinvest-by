@@ -59,7 +59,7 @@ export function Login() {
   const [code, setCode] = useState("");
   const [mfa, setMfa] = useState(sp.get("step") === "2fa");
   const [mfaWays, setMfaWays] = useState<{ totp: boolean; passkey: boolean; telegram?: boolean; email?: boolean }>({ totp: true, passkey: false });
-  const [mfaSent, setMfaSent] = useState<null | { via: string; test_code?: string }>(null);
+  const [mfaSent, setMfaSent] = useState<null | { via: string; test_code?: string; mail_failed?: boolean }>(null);
   const [keyBusy, setKeyBusy] = useState(false);
   const s = useSubmit();
   const phoneOn = !!config?.auth && config.auth.phone !== "off";
@@ -129,14 +129,14 @@ export function Login() {
                   <Field label={mfaSent.via === "telegram" ? "Код из Telegram" : "Код из письма"} error={s.fieldError("code")} htmlFor="code">
                     <Input id="code" name="one-time-code" inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))} autoFocus invalid={!!s.fieldError("code")} />
                   </Field>
-                  {mfaSent.test_code && <Notice kind="warn">Тестовый режим: код — <b className="num">{mfaSent.test_code}</b></Notice>}
+                  {mfaSent.test_code && <Notice kind="warn">{mfaSent.mail_failed ? "Письмо не ушло: почта недоступна с этого компьютера." : "Тестовый режим:"} Код — <b className="num">{mfaSent.test_code}</b></Notice>}
                 </div>
               ) : (
                 <div className="stack g8">
                   <span className="small muted">Нет Face ID на этом устройстве? Пришлём код:</span>
                   <div className="row g8 wrap">
                     {mfaWays.telegram && <Button onClick={async () => { try { const r = await s.submit(() => api.post<{ via: string; test_code?: string }>("/auth/login/code", { via: "telegram" })); if (r) setMfaSent(r); } catch { /* */ } }}>В Telegram</Button>}
-                    {mfaWays.email && <Button onClick={async () => { try { const r = await s.submit(() => api.post<{ via: string; test_code?: string }>("/auth/login/code", { via: "email" })); if (r) setMfaSent(r); } catch { /* */ } }}>На почту</Button>}
+                    {mfaWays.email && <Button onClick={async () => { try { const r = await s.submit(() => api.post<{ via: string; test_code?: string; mail_failed?: boolean }>("/auth/login/code", { via: "email" })); if (r) setMfaSent(r); } catch { /* */ } }}>На почту</Button>}
                   </div>
                 </div>
               )
@@ -196,7 +196,7 @@ export function Register() {
   const nav = useNavigate();
   const { setMe, me } = useSession();
   const [f, setF] = useState({ name: "", email: "", password: "", offer: false, privacy: false });
-  const [sent, setSent] = useState<null | { test_code?: string }>(null);
+  const [sent, setSent] = useState<null | { test_code?: string; mail_failed?: boolean }>(null);
   const [code, setCode] = useState("");
   const s = useSubmit();
   const ref = sp.get("ref") || "";
@@ -211,7 +211,7 @@ export function Register() {
     e.preventDefault();
     try {
       if (!sent) {
-        const r = await s.submit(() => api.post<{ test_code?: string }>("/auth/register/start", { name: f.name, email: f.email, password: f.password, ref, accept_offer: f.offer, accept_privacy: f.privacy, ...getUtm() }));
+        const r = await s.submit(() => api.post<{ test_code?: string; mail_failed?: boolean }>("/auth/register/start", { name: f.name, email: f.email, password: f.password, ref, accept_offer: f.offer, accept_privacy: f.privacy, ...getUtm() }));
         if (r) setSent(r);
         return;
       }
@@ -240,7 +240,7 @@ export function Register() {
             <Field label="Код из письма" error={s.fieldError("code")} htmlFor="code">
               <Input id="code" name="one-time-code" inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))} autoFocus invalid={!!s.fieldError("code")} />
             </Field>
-            {sent.test_code && <Notice kind="warn">Тестовый режим: почта не настроена, код — <b className="num">{sent.test_code}</b></Notice>}
+            {sent.test_code && <Notice kind="warn">{sent.mail_failed ? "Письмо не ушло: почта недоступна с этого компьютера (VPN или провайдер)." : "Тестовый режим: почта не настроена."} Код — <b className="num">{sent.test_code}</b></Notice>}
             {s.error && !s.field && <Notice kind="error">{s.error}</Notice>}
             <button type="button" className="link-btn small" onClick={() => { setSent(null); setCode(""); s.reset(); }}>Изменить почту или отправить код ещё раз</button>
           </div>

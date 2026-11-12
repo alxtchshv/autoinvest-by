@@ -168,13 +168,29 @@ func (s *Server) registerStart(w http.ResponseWriter, r *http.Request) {
 	}
 	resp := map[string]any{"ok": true, "email": in.Email}
 	if mailer.Enabled() {
-		go mailer.Send(in.Email, "Код для регистрации в AutoInvest: "+code,
-			"Здравствуйте, "+in.Name+"!\n\nВаш код для регистрации в AutoInvest: "+code+"\n\nКод действует 15 минут. Если вы не регистрировались, просто проигнорируйте письмо.")
+		if !s.mailCode(w, resp, in.Email, code, "Код для регистрации в AutoInvest: "+code,
+			"Здравствуйте, "+in.Name+"!\n\nВаш код для регистрации в AutoInvest: "+code+"\n\nКод действует 15 минут. Если вы не регистрировались, просто проигнорируйте письмо.") {
+			return
+		}
 	} else {
 		resp["test_code"] = code // почта не настроена (стенд, разработка) — показываем код на экране
 		s.Log.Info("регистрация: код (почта не настроена)", "email", in.Email, "code", code)
 	}
 	writeJSON(w, 200, resp)
+}
+
+// mailCode — письмо с кодом отправляется сразу, а не в фоне: человек ждёт этот код на экране.
+// Не ушло: на сервере — понятная ошибка (код никто не увидит), на компьютере разработчика — код на экране,
+// чтобы проверка не застревала из-за закрытых почтовых портов (VPN, провайдер).
+func (s *Server) mailCode(w http.ResponseWriter, resp map[string]any, to, code, subject, body string) bool {
+	if err := s.N.Mailer().Send(to, subject, body); err != nil {
+		if s.Cfg.Env == "production" {
+			writeErr(w, http.StatusBadGateway, "Не получилось отправить письмо. Попробуйте ещё раз через минуту")
+			return false
+		}
+		resp["test_code"], resp["mail_failed"] = code, true
+	}
+	return true
 }
 
 func (s *Server) registerConfirm(w http.ResponseWriter, r *http.Request) {

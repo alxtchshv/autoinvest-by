@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"fmt"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -197,5 +198,30 @@ func TestPasskeyUserFallbackCode(t *testing.T) {
 	}
 	if code := c2.do("POST", "/api/v1/auth/login/2fa", map[string]any{"code": sent.TestCode}, nil); code != 200 {
 		t.Fatalf("вход по коду: %d", code)
+	}
+}
+
+// Почтовые порты закрыты (VPN, провайдер): регистрация не зависает. На компьютере разработчика код на экране,
+// на сервере — понятная ошибка вместо «код отправлен», которого никто не получит.
+func TestSignupWhenMailUnreachable(t *testing.T) {
+	srv, s := newServer(t)
+	ln, _ := net.Listen("tcp", "127.0.0.1:0")
+	port := ln.Addr().(*net.TCPAddr).Port
+	ln.Close() // порт свободен — соединение сразу отклоняется
+	m := s.N.Mailer()
+	m.Host, m.Port = "127.0.0.1", port
+	c := newClient(t, srv.URL)
+	var out struct {
+		TestCode   string `json:"test_code"`
+		MailFailed bool   `json:"mail_failed"`
+	}
+	body := map[string]any{"name": "Почта", "email": "mail@test.by", "password": "parol-dlinnyi-1", "accept_offer": true, "accept_privacy": true}
+	if code := c.do("POST", "/api/v1/auth/register/start", body, &out); code != 200 || !out.MailFailed || len(out.TestCode) != 6 {
+		t.Fatalf("разработка: %d %+v", code, out)
+	}
+	s.Cfg.Env = "production"
+	body["email"] = "mail2@test.by"
+	if code := c.do("POST", "/api/v1/auth/register/start", body, nil); code != http.StatusBadGateway {
+		t.Fatalf("сервер: письмо не ушло, а ответили %d", code)
 	}
 }

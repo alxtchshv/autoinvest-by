@@ -340,6 +340,12 @@ func (s *Server) deleteAccount(w http.ResponseWriter, r *http.Request) {
 	s.DB.ExecContext(ctx, `UPDATE users SET status='deleted', email=?, phone='', name='Удалённый пользователь', telegram_chat_id=NULL, totp_secret='', recovery_codes='', updated_at=? WHERE id=?`,
 		fmt.Sprintf("deleted+%d@deleted.local", u.ID), store.Now(), u.ID)
 	s.DB.ExecContext(ctx, `DELETE FROM sessions WHERE user_id=?`, u.ID)
+	// способы входа отвязываем: иначе вход тем же Google попадал бы в удалённый аккаунт, а не создавал новый
+	s.DB.ExecContext(ctx, `DELETE FROM user_identities WHERE user_id=?`, u.ID)
+	s.DB.ExecContext(ctx, `DELETE FROM passkeys WHERE user_id=?`, u.ID)
+	s.DB.ExecContext(ctx, `UPDATE users SET phone_verified_at=NULL, waitlist_at=NULL, telegram_username='', notify_email=0, notify_telegram=0 WHERE id=?`, u.ID)
+	// демо-счёт уходит вместе с аккаунтом (история операций остаётся, но без связи с человеком)
+	s.DB.ExecContext(ctx, `UPDATE users SET status='deleted', demo_of=NULL, email='deleted-demo+'||id||'@deleted.local' WHERE demo_of=?`, u.ID)
 	s.St.RevokeConsents(ctx, u.ID)
 	s.St.Audit(ctx, u.ID, u.ID, "account.deleted", "", clientIP(r))
 	s.clearSession(w)

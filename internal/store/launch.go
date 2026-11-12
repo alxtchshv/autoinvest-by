@@ -109,13 +109,13 @@ func (s *Store) LaunchFunnel(ctx context.Context) (LaunchFunnel, error) {
 	q(&f.Onboarded, `SELECT COUNT(*)`+base+` AND u.onboarded_at IS NOT NULL`)
 	q(&f.PlanCreated, `SELECT COUNT(*)`+base+` AND EXISTS(SELECT 1 FROM plans p WHERE p.user_id=u.id)`)
 	q(&f.Waitlist, `SELECT COUNT(*)`+base+` AND u.waitlist_at IS NOT NULL`)
-	q(&f.DemoUsers, `SELECT COUNT(*) FROM users WHERE role='demo'`)
-	q(&f.DemoInvested, `SELECT COUNT(DISTINCT o.user_id) FROM orders o JOIN users d ON d.id=o.user_id WHERE d.role='demo' AND o.side='buy' AND o.status='filled'`)
+	q(&f.DemoUsers, `SELECT COUNT(*) FROM users WHERE role='demo' AND status!='deleted'`)
+	q(&f.DemoInvested, `SELECT COUNT(DISTINCT o.user_id) FROM orders o JOIN users d ON d.id=o.user_id WHERE d.role='demo' AND d.status!='deleted' AND o.side='buy' AND o.status='filled'`)
 	q(&f.Feedback, `SELECT COUNT(*) FROM tickets WHERE category IN ('idea','bug')`)
 	q(&f.TelegramLinks, `SELECT COUNT(*)`+base+` AND u.telegram_chat_id IS NOT NULL`)
 	rows, err := s.DB.QueryContext(ctx, `
 		WITH v AS (SELECT source, campaign, SUM(count) n FROM visits WHERE day>=? GROUP BY source, campaign),
-		     r AS (SELECT utm_source source, utm_campaign campaign, COUNT(*) reg, SUM(waitlist_at IS NOT NULL) wl FROM users WHERE role='user' GROUP BY 1, 2)
+		     r AS (SELECT utm_source source, utm_campaign campaign, COUNT(*) reg, SUM(waitlist_at IS NOT NULL) wl FROM users WHERE role='user' AND status!='deleted' GROUP BY 1, 2)
 		SELECT v.source, v.campaign, v.n, COALESCE(r.reg,0), COALESCE(r.wl,0) FROM v LEFT JOIN r ON r.source=v.source AND r.campaign=v.campaign
 		ORDER BY v.n DESC LIMIT 30`, from)
 	if err != nil {

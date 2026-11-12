@@ -815,6 +815,11 @@ func (b *Bot) bind(ctx context.Context, chat int64, username, code string) {
 		name = ", " + escape(firstName(u.Name))
 	}
 	b.send(chat, "Готово"+name+"! Аккаунт подключён. Сюда будут приходить чеки о пополнениях и выводах, напоминания и ответы поддержки.", b.mainMenu())
+	// номер ещё не подтверждён — сразу предлагаем кнопку: без неё вход по номеру не заработает.
+	// Telegram передаёт номер по кнопке, даже если в настройках приватности он скрыт от всех.
+	if u != nil && !u.PhoneVerified {
+		b.AskPhone(chat)
+	}
 }
 
 func escape(s string) string {

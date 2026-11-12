@@ -93,10 +93,9 @@ func TestTelegramBotInSandbox(t *testing.T) {
 		t.Fatalf("чужая кнопка: %d", code)
 	}
 
-	// телефон: бот присылает кнопку «Поделиться номером», номер подтверждается, коды входа приходят в бот
-	if code := c.do("POST", "/api/v1/telegram/sandbox/contact", map[string]any{"phone": "+375291112233"}, nil); code != 400 {
-		t.Fatalf("номер без запроса бота принят: %d", code)
-	}
+	// телефон: сразу после подключения бот сам присылает кнопку «Поделиться номером» (номер ещё не подтверждён);
+	// её же можно запросить из профиля. Номер подтверждается, коды входа приходят в бот
+	waitBot(t, c, "Поделиться номером")
 	if code := c.do("POST", "/api/v1/me/phone/telegram", map[string]any{}, nil); code != 200 {
 		t.Fatalf("запрос номера: %d", code)
 	}
@@ -104,6 +103,12 @@ func TestTelegramBotInSandbox(t *testing.T) {
 	c.do("POST", "/api/v1/telegram/sandbox/contact", map[string]any{"phone": "+375 29 111-22-33"}, nil)
 	waitBot(t, c, "подтверждён")
 	anon := newClient(t, srv.URL)
+	// опечатки в номере не замораживают вход: лимит считает только отправленные коды
+	for i := 0; i < 5; i++ {
+		if code := anon.do("POST", "/api/v1/auth/phone/code", map[string]any{"phone": "+375291110000"}, nil); code == 429 || code == 200 {
+			t.Fatalf("неизвестный номер, попытка %d: %d", i+1, code)
+		}
+	}
 	var sent struct {
 		TestCode string `json:"test_code"`
 	}

@@ -1,8 +1,7 @@
 // До запуска (LAUNCH_MODE=waitlist): лист ожидания, переход на демо-счёт и плашка демо-счёта.
 // Окно листа ожидания открывается само, когда сервер отвечает code=waitlist (оплата, карта, пополнение).
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { Gift, Lightbulb, PlayCircle, Send } from "lucide-react";
+import { Gift, PlayCircle } from "lucide-react";
 import { api } from "../lib/api";
 import { useSession } from "../lib/session";
 import type { Me } from "../lib/types";
@@ -30,7 +29,6 @@ export function useDemoSwitch() {
 /** Содержимое «вы в листе ожидания»: место, бонус, демо-счёт и обратная связь. */
 export function WaitlistContent({ position, onDone }: { position?: number; onDone?: () => void }) {
   const { me } = useSession();
-  const nav = useNavigate();
   const demo = useDemoSwitch();
   return (
     <div className="wl stack g16">
@@ -45,10 +43,6 @@ export function WaitlistContent({ position, onDone }: { position?: number; onDon
       <div className="wl-actions">
         <Button variant="primary" size="lg" block icon={<PlayCircle />} busy={demo.busy} onClick={() => { onDone?.(); demo.enter(); }}>А пока — попробовать на демо-счёте</Button>
         <span className="small muted wl-note">Демо-счёт: виртуальные деньги, настоящие цены. Можно пополнять, выводить, менять план — как будет после запуска.</span>
-      </div>
-      <div className="wl-links">
-        {!me?.telegram_linked && <Button icon={<Send />} onClick={() => { onDone?.(); nav("/app/profile/notifications"); }}>Получить новость в Telegram</Button>}
-        <Button variant="ghost" icon={<Lightbulb />} onClick={() => { onDone?.(); nav("/app/support?new=idea"); }}>Предложить идею</Button>
       </div>
     </div>
   );

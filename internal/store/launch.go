@@ -15,8 +15,18 @@ import (
 
 // JoinWaitlist отмечает, что человек дошёл до оплаты и ждёт запуска; возвращает его место в очереди.
 func (s *Store) JoinWaitlist(ctx context.Context, userID int64) (int, error) {
-	s.DB.ExecContext(ctx, `UPDATE users SET waitlist_at=? WHERE id=? AND waitlist_at IS NULL`, Now(), userID)
-	return s.WaitlistPosition(ctx, userID)
+	pos, _, err := s.JoinWaitlistFirst(ctx, userID)
+	return pos, err
+}
+
+// JoinWaitlistFirst — то же, плюс first=true, если человек попал в список только что (для приветственных уведомлений).
+func (s *Store) JoinWaitlistFirst(ctx context.Context, userID int64) (pos int, first bool, err error) {
+	if res, e := s.DB.ExecContext(ctx, `UPDATE users SET waitlist_at=? WHERE id=? AND waitlist_at IS NULL`, Now(), userID); e == nil {
+		n, _ := res.RowsAffected()
+		first = n > 0
+	}
+	pos, err = s.WaitlistPosition(ctx, userID)
+	return pos, first, err
 }
 
 func (s *Store) WaitlistPosition(ctx context.Context, userID int64) (int, error) {

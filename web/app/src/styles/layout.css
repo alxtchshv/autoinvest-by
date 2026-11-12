@@ -130,6 +130,7 @@ section[id] { scroll-margin-top: 72px; }
 .site-foot h4 { color: var(--ink); font-size: 14px; margin: 0 0 12px; }
 .site-foot a { color: var(--muted); display: block; margin-bottom: 8px; }
 .site-foot a:hover { color: var(--ink); }
+.site-foot a.brand { display: flex; width: fit-content; color: var(--ink); }
 .site-foot .legal { margin: 32px 0 0; padding-top: 20px; border-top: 1px solid var(--line); font-size: 13px; line-height: 19px; text-align: center; }
 .site-foot .legal span { display: block; max-width: 62em; margin: 0 auto; }
 @media (max-width: 860px) { .site-foot .cols { grid-template-columns: 1fr 1fr; } }

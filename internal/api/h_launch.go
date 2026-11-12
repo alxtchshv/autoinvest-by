@@ -7,6 +7,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -29,7 +30,7 @@ func (s *Server) waitlistBlock(w http.ResponseWriter, r *http.Request) bool {
 	if !s.waitlistMode() || u == nil || u.IsDemo() {
 		return false
 	}
-	pos, _ := s.St.JoinWaitlist(r.Context(), u.ID)
+	pos, _ := s.joinWaitlist(r.Context(), u)
 	writeJSON(w, http.StatusConflict, map[string]any{"error": "Пополнения откроются совсем скоро — вы в списке первых", "code": "waitlist", "position": pos})
 	return true
 }
@@ -81,12 +82,38 @@ func (s *Server) waitlistInfo(w http.ResponseWriter, r *http.Request) {
 // POST /waitlist/join
 func (s *Server) waitlistJoin(w http.ResponseWriter, r *http.Request) {
 	u := currentUser(r)
-	pos, err := s.St.JoinWaitlist(r.Context(), realUserID(u))
+	real := u
+	if u.IsDemo() {
+		real, _ = s.St.UserByID(r.Context(), *u.DemoOf)
+	}
+	if real == nil {
+		s.internal(w, r, errors.New("нет основного аккаунта"))
+		return
+	}
+	pos, err := s.joinWaitlist(r.Context(), real)
 	if err != nil {
 		s.internal(w, r, err)
 		return
 	}
 	writeJSON(w, 200, map[string]any{"joined": true, "position": pos})
+}
+
+// joinWaitlist — в лист ожидания; при первом попадании — уведомления: идеи и ошибки (за полезные — Pro),
+// и, если Telegram ещё не подключён, предложение подключить его. Окно листа ожидания остаётся коротким.
+func (s *Server) joinWaitlist(ctx context.Context, u *store.User) (int, error) {
+	pos, first, err := s.St.JoinWaitlistFirst(ctx, u.ID)
+	if err != nil || !first {
+		return pos, err
+	}
+	s.N.Send(ctx, u.ID, notify.Message{Kind: "support", Title: "Помогите сделать AutoInvest лучше",
+		Body: "Нашли ошибку или есть идея? Напишите нам в поддержку — за полезные предложения добавим дни Pro к запуску.",
+		Link: "/app/support?new=idea"})
+	if u.TelegramChatID == nil && s.Bot != nil {
+		s.N.Send(ctx, u.ID, notify.Message{Kind: "billing", Title: "Узнайте о запуске первыми",
+			Body: "Подключите Telegram — пришлём новость о запуске и коды входа прямо в чат.",
+			Link: "/app/profile/notifications"})
+	}
+	return pos, nil
 }
 
 // POST /demo/enter — переход на демо-счёт. При первом входе: демо-карта, копии настроенных копилок и первое пополнение,

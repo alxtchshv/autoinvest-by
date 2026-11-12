@@ -29,6 +29,20 @@ func TestWaitlistAndDemo(t *testing.T) {
 	if !cr.Plan.Waiting || cr.Plan.Status != "paused" || cr.Waitlist.Position != 1 {
 		t.Fatalf("ожидание: %+v", cr)
 	}
+	// в лист ожидания — уведомление про идеи и ошибки (окно листа ожидания остаётся коротким)
+	var ns struct {
+		Notifications []struct{ Title, Link string }
+	}
+	c.do("GET", "/api/v1/notifications", nil, &ns)
+	fb := 0
+	for _, n := range ns.Notifications {
+		if n.Link == "/app/support?new=idea" {
+			fb++
+		}
+	}
+	if fb != 1 {
+		t.Fatalf("уведомление про идеи: %d, %+v", fb, ns.Notifications)
+	}
 	// оплаты закрыты
 	var e struct{ Code string }
 	if code := c.do("POST", "/api/v1/cards/bind", map[string]any{}, &e); code != 409 || e.Code != "waitlist" {

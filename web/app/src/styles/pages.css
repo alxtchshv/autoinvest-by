@@ -627,3 +627,10 @@
 .funnel-step .l { font-size: 13px; color: var(--muted); }
 .funnel-step b { font-size: 24px; letter-spacing: -0.02em; }
 .reward-bar { background: #f6fbf8; border-color: #cde9d9; }
+
+/* Регистрация помещается в экран ноутбука без прокрутки */
+.auth-compact h1 { font-size: 24px; }
+.auth-wrap:has(.auth-compact) { padding-top: 16px; }
+.auth-compact .auth-checks .check { font-size: 13px; line-height: 18px; }
+.auth-google-note { text-align: center; margin: -2px 0 0; line-height: 16px; }
+.mt4 { margin-top: 4px; }

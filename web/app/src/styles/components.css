@@ -353,3 +353,9 @@ button.list-row { width: 100%; border-left: 0; border-right: 0; border-bottom: 0
 .bio-x svg { width: 16px; height: 16px; }
 @keyframes bioIn { from { opacity: 0; transform: translateY(20px) scale(.97); } }
 @media (max-width: 860px) { .bio-offer { right: 16px; bottom: 84px; } }
+
+/* Поле номера: «+375» стоит всегда, вводятся только 9 цифр */
+.phone-input { position: relative; }
+.phone-input .phone-cc { position: absolute; left: 14px; top: 50%; transform: translateY(-50%); color: var(--ink); font-size: 15px; pointer-events: none; font-variant-numeric: tabular-nums; }
+.phone-input .input { padding-left: 58px; font-variant-numeric: tabular-nums; }
+.phone-input .input:disabled + .phone-cc, .phone-input:has(.input:disabled) .phone-cc { color: var(--muted); }

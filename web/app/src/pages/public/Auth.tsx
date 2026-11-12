@@ -8,22 +8,11 @@ import { Button, Field, Input, Notice, Segmented } from "../../components/ui";
 import { OrLine, SocialButtons, SocialConsent } from "../../components/SocialLogin";
 import { getUtm } from "../../lib/utm";
 import { Fingerprint } from "lucide-react";
+import { fullPhone, PhoneInput } from "../../components/PhoneInput";
 import { deviceHasPasskey, passkeyError, passkeysSupported, usePasskey } from "../../lib/webauthn";
 
 function safeNext(n: string | null) {
   return n && n.startsWith("/") && !n.startsWith("//") ? n : "/app";
-}
-
-function formatPhone(v: string) {
-  const d = v.replace(/\D/g, "").replace(/^80/, "375");
-  const x = (d.startsWith("375") ? d.slice(3) : d).slice(0, 9);
-  let out = "+375";
-  if (x.length) out += " (" + x.slice(0, 2);
-  if (x.length >= 2) out += ")";
-  if (x.length > 2) out += " " + x.slice(2, 5);
-  if (x.length > 5) out += "-" + x.slice(5, 7);
-  if (x.length > 7) out += "-" + x.slice(7, 9);
-  return out;
 }
 
 function strength(p: string): [number, string] {
@@ -97,8 +86,8 @@ export function Login() {
     try {
       if (mfa) finish(await s.submit(() => api.post<Me>("/auth/login/2fa", { code })));
       else if (how === "password") finish(await s.submit(() => api.post<Me>("/auth/login", { email, password })));
-      else if (!sent) setSent((await s.submit(() => api.post<{ test_code?: string; via?: string }>("/auth/phone/code", { phone }))) || null);
-      else finish(await s.submit(() => api.post<Me>("/auth/phone/login", { phone, code: sms })));
+      else if (!sent) setSent((await s.submit(() => api.post<{ test_code?: string; via?: string }>("/auth/phone/code", { phone: fullPhone(phone) }))) || null);
+      else finish(await s.submit(() => api.post<Me>("/auth/phone/login", { phone: fullPhone(phone), code: sms })));
     } catch {
       /* ошибка уже в s.error */
     }
@@ -161,7 +150,7 @@ export function Login() {
             ) : (
               <div key="ph" className="stack g16 fade-in">
                 <Field label="Номер телефона" error={s.fieldError("phone")} htmlFor="phone" hint={sent ? undefined : "Код придёт в Telegram. Номер подключается в профиле"}>
-                  <Input id="phone" name="tel" type="tel" autoComplete="tel" placeholder="+375 (29) 123-45-67" value={phone} disabled={!!sent} onChange={(e) => setPhone(e.target.value ? formatPhone(e.target.value) : "")} invalid={!!s.fieldError("phone")} autoFocus />
+                  <PhoneInput id="phone" name="tel" value={phone} disabled={!!sent} onChange={setPhone} invalid={!!s.fieldError("phone")} autoFocus />
                 </Field>
                 {sent && (
                   <>
@@ -228,10 +217,10 @@ export function Register() {
   const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement>) => setF({ ...f, [k]: e.target.type === "checkbox" ? e.target.checked : e.target.value });
   return (
     <div className="auth-wrap">
-      <form className="auth-card sheet sheet-pad stack g16" method="post" action="/register" autoComplete="on" onSubmit={onSubmit} noValidate>
+      <form className="auth-card auth-compact sheet sheet-pad stack g12" method="post" action="/register" autoComplete="on" onSubmit={onSubmit} noValidate>
         <div>
           <h1>{sent ? "Подтвердите почту" : "Регистрация"}</h1>
-          <p className="muted mt8">Займёт минуту. Привязать карту и настроить копилку можно сразу после.</p>
+          {sent && <p className="muted mt4">Остался один шаг</p>}
         </div>
         {ref && <Notice kind="ok">Вы пришли по приглашению — после первого пополнения вам и другу включим месяц Pro.</Notice>}
         {sent ? (
@@ -247,28 +236,28 @@ export function Register() {
         ) : (
           <>
         <SocialButtons next={sp.get("next") || "/app/onboarding"} />
-        <SocialConsent />
         <OrLine />
         {s.error && !s.field && <Notice kind="error">{s.error}</Notice>}
         <Field label="Имя" error={s.fieldError("name")} htmlFor="name">
           <Input id="name" name="name" autoComplete="name" value={f.name} onChange={set("name")} invalid={!!s.fieldError("name")} autoFocus />
         </Field>
-        <Field label="Почта" error={s.fieldError("email")} hint="Пришлём на неё код подтверждения" htmlFor="email">
+        <Field label="Почта" error={s.fieldError("email")} htmlFor="email">
           <Input id="email" name="email" type="email" autoComplete="username" autoCapitalize="none" spellCheck={false} value={f.email} onChange={set("email")} invalid={!!s.fieldError("email")} />
         </Field>
-        <Field label="Пароль" error={s.fieldError("password")} htmlFor="password" hint={f.password ? `Надёжность: ${label}` : "Не короче 8 символов, буквы и цифры"}>
+        <Field label="Пароль" error={s.fieldError("password")} htmlFor="password" hint={f.password ? `Надёжность: ${label}` : "От 8 символов, буквы и цифры"}>
           <Input id="password" name="new-password" type="password" autoComplete="new-password" value={f.password} onChange={set("password")} invalid={!!s.fieldError("password")} />
           {f.password && <div className="bar" aria-hidden><span style={{ width: score * 25 + "%", background: score < 2 ? "var(--down)" : score < 3 ? "var(--warn)" : "var(--up)" }} /></div>}
         </Field>
-        <div className="stack g12">
-          <label className="check"><input type="checkbox" checked={f.offer} onChange={set("offer")} /><span>Ознакомлен с <Link to="/legal/offer" target="_blank">публичной офертой</Link> и <Link to="/legal/risks" target="_blank">предупреждением о рисках</Link>, принимаю условия оферты</span></label>
+        <div className="stack g8 auth-checks">
+          <label className="check"><input type="checkbox" checked={f.offer} onChange={set("offer")} /><span>Принимаю <Link to="/legal/offer" target="_blank">оферту</Link> и <Link to="/legal/risks" target="_blank">предупреждение о рисках</Link></span></label>
           {s.fieldError("accept_offer") && <div className="small down">{s.fieldError("accept_offer")}</div>}
-          <label className="check"><input type="checkbox" checked={f.privacy} onChange={set("privacy")} /><span>Даю согласие на обработку персональных данных в соответствии с <Link to="/legal/privacy" target="_blank">Политикой обработки персональных данных</Link> (Закон Республики Беларусь № 99-З)</span></label>
+          <label className="check"><input type="checkbox" checked={f.privacy} onChange={set("privacy")} /><span>Согласен на <Link to="/legal/privacy" target="_blank">обработку персональных данных</Link></span></label>
           {s.fieldError("accept_privacy") && <div className="small down">{s.fieldError("accept_privacy")}</div>}
         </div>
           </>
         )}
         <Button type="submit" variant="primary" size="lg" block busy={s.busy} disabled={!!sent && code.length !== 6}>{sent ? "Подтвердить и создать аккаунт" : "Получить код на почту"}</Button>
+        {!sent && <p className="tiny muted auth-google-note">Через Google: при первом входе вы принимаете <Link to="/legal/offer" target="_blank">оферту</Link>, <Link to="/legal/risks" target="_blank">риски</Link> и <Link to="/legal/privacy" target="_blank">обработку данных</Link>.</p>}
         <p className="small muted" style={{ textAlign: "center" }}>Уже есть аккаунт? <Link to="/login">Войти</Link></p>
       </form>
     </div>

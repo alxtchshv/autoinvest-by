@@ -60,13 +60,14 @@ func (s *Server) phoneLoginCode(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusServiceUnavailable, "Вход по телефону пока не подключён")
 		return
 	}
-	if !s.limiter.Allow("tgcode:"+phone, 3, 10*time.Minute) || !s.limiter.Allow("tgcode-ip:"+clientIP(r), 10, time.Hour) {
-		writeErr(w, http.StatusTooManyRequests, "Слишком много кодов. Подождите 10 минут")
+	// проверки номеров с одного адреса — с запасом на опечатки, но без перебора базы
+	if !s.limiter.Allow("tglookup-ip:"+clientIP(r), 15, 10*time.Minute) {
+		writeErr(w, http.StatusTooManyRequests, "Слишком много попыток. Подождите 10 минут")
 		return
 	}
 	u, err := s.St.UserByPhone(r.Context(), phone)
 	if errors.Is(err, store.ErrNotFound) {
-		writeFieldErr(w, "phone", "Этот номер не подтверждён ни в одном аккаунте. Войдите по почте и подключите телефон в профиле")
+		writeFieldErr(w, "phone", "Этот номер ещё не подключён ко входу. Войдите по почте или через Google, затем Профиль → Безопасность → «Телефон и код в Telegram» → «Подтвердить»: бот попросит поделиться номером")
 		return
 	}
 	if err != nil {
@@ -74,7 +75,12 @@ func (s *Server) phoneLoginCode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if u.TelegramChatID == nil {
-		writeFieldErr(w, "phone", "К аккаунту не подключён Telegram — войдите по почте")
+		writeFieldErr(w, "phone", "К аккаунту не подключён Telegram — войдите по почте или через Google")
+		return
+	}
+	// лимит — только на настоящие отправки кода, а не на опечатки в номере
+	if !s.limiter.Allow("tgcode:"+phone, 3, 10*time.Minute) || !s.limiter.Allow("tgcode-ip:"+clientIP(r), 10, time.Hour) {
+		writeErr(w, http.StatusTooManyRequests, "Код уже отправлен несколько раз — проверьте чат с ботом в Telegram или подождите 10 минут")
 		return
 	}
 	code := randomDigits(6)

@@ -86,6 +86,26 @@ func TestOAuthSandboxLoginAndLink(t *testing.T) {
 	if me.User == nil || me.User.Email != "link@test.by" {
 		t.Fatalf("вход привязанным Google попал не в тот аккаунт: %+v", me.User)
 	}
+	// включена биометрия — после Google тот же второй шаг, что и после пароля
+	lu, _ := s.St.UserByEmail(context.Background(), "link@test.by")
+	s.St.AddPasskey(context.Background(), lu.ID, "cred-g", "Mac · Safari", `{}`)
+	c4 := newClient(t, srv.URL)
+	st4 := strings.TrimPrefix(c4.get("/oauth/google/start?next=/app/plans").Header.Get("Location"), "/oauth-sandbox?provider=google&state=")
+	if l := c4.postForm("/oauth/sandbox/callback", url.Values{"provider": {"google"}, "state": {st4}, "email": {"other@gmail.test"}}).Header.Get("Location"); l != "/login?step=2fa&next=%2Fapp%2Fplans" {
+		t.Fatalf("Google при включённой биометрии: %s", l)
+	}
+	var pending struct {
+		User        *store.User
+		MFARequired bool `json:"mfa_required"`
+		MFA         map[string]bool
+	}
+	c4.do("GET", "/api/v1/auth/me", nil, &pending)
+	if pending.User != nil || !pending.MFARequired || !pending.MFA["passkey"] || !pending.MFA["email"] {
+		t.Fatalf("после Google без второго шага уже пустило: %+v", pending)
+	}
+	if code := c4.do("GET", "/api/v1/plans", nil, nil); code != 401 {
+		t.Fatalf("до второго шага кабинет должен быть закрыт: %d", code)
+	}
 	// открытый редирект после входа не пропускаем
 	if safeNext("//evil.com") != "/app" || safeNext("https://evil.com") != "/app" || safeNext("/app/cards") != "/app/cards" {
 		t.Fatal("safeNext")

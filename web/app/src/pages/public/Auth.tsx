@@ -8,7 +8,7 @@ import { Button, Field, Input, Notice, Segmented } from "../../components/ui";
 import { OrLine, SocialButtons, SocialConsent } from "../../components/SocialLogin";
 import { getUtm } from "../../lib/utm";
 import { Fingerprint } from "lucide-react";
-import { passkeyError, passkeysSupported, usePasskey } from "../../lib/webauthn";
+import { deviceHasPasskey, passkeyError, passkeysSupported, usePasskey } from "../../lib/webauthn";
 
 function safeNext(n: string | null) {
   return n && n.startsWith("/") && !n.startsWith("//") ? n : "/app";
@@ -63,9 +63,22 @@ export function Login() {
   const [keyBusy, setKeyBusy] = useState(false);
   const s = useSubmit();
   const phoneOn = !!config?.auth && config.auth.phone !== "off";
+  // Face ID / отпечаток вместо кода: если ключ есть на этом устройстве, системное окно открывается само —
+  // сразу после «Войти» или после возврата от Google. Не открылось (Safari просит касание) или отменили — остаётся кнопка.
+  const autoKey = useRef(false);
+  const runKey = async (auto: boolean) => {
+    setKeyBusy(true); s.reset();
+    try { setMe(await usePasskey("login")); } catch (e: any) { if (!auto) s.setError(passkeyError(e)); } finally { setKeyBusy(false); }
+  };
+  const maybeAutoKey = (ways?: { passkey: boolean }) => {
+    if (autoKey.current || !ways?.passkey || !passkeysSupported() || !deviceHasPasskey()) return;
+    autoKey.current = true;
+    runKey(true);
+  };
   useEffect(() => {
     if (me?.user) nav(safeNext(sp.get("next")), { replace: true });
-    if (me?.mfa_required) { setMfa(true); if (me.mfa) setMfaWays(me.mfa); }
+    if (me?.mfa_required) { setMfa(true); if (me.mfa) { setMfaWays(me.mfa); maybeAutoKey(me.mfa); } }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [me, nav, sp]);
   // Chrome, Edge и Android предлагают сохранить пароль через Credential Management API; Safari и iOS — сами по отправке формы
   const savePassword = () => {
@@ -76,7 +89,7 @@ export function Login() {
   };
   const finish = (r: Me | undefined) => {
     if (r && (r.user || r.mfa_required)) savePassword();
-    if (r?.mfa_required) { setMfa(true); if (r.mfa) setMfaWays(r.mfa); return; }
+    if (r?.mfa_required) { setMfa(true); if (r.mfa) { setMfaWays(r.mfa); maybeAutoKey(r.mfa); } return; }
     if (r) setMe(r);
   };
   const onSubmit = async (e: FormEvent) => {
@@ -103,10 +116,7 @@ export function Login() {
         {mfa ? (
           <>
             {mfaWays.passkey && passkeysSupported() && (
-              <Button variant="primary" size="lg" block icon={<Fingerprint />} busy={keyBusy} onClick={async () => {
-                setKeyBusy(true); s.reset();
-                try { setMe(await usePasskey("login")); } catch (e: any) { s.setError(passkeyError(e)); } finally { setKeyBusy(false); }
-              }}>Войти с Face ID или отпечатком</Button>
+              <Button variant="primary" size="lg" block icon={<Fingerprint />} busy={keyBusy} onClick={() => runKey(false)}>Подтвердить Face ID или отпечатком</Button>
             )}
             {mfaWays.totp && (
               <Field label="Код из Google Authenticator" error={s.fieldError("code")} htmlFor="code">
@@ -167,6 +177,12 @@ export function Login() {
           </>
         )}
         {(!mfa || mfaWays.totp || mfaSent) && <Button type="submit" variant={mfa && mfaWays.passkey ? "secondary" : "primary"} size="lg" block busy={s.busy}>{mfa ? "Подтвердить код" : how === "phone" && !sent ? "Получить код в Telegram" : "Войти"}</Button>}
+        {mfa && (
+          <button type="button" className="link-btn small" style={{ alignSelf: "center" }} onClick={async () => {
+            try { await api.post("/auth/logout"); } catch { /* сеанс уже истёк */ }
+            autoKey.current = false; setMfa(false); setMfaSent(null); setCode(""); s.reset(); setMe({ user: null });
+          }}>Войти в другой аккаунт</button>
+        )}
         {!mfa && <SocialConsent />}
         {!mfa && <p className="small muted" style={{ textAlign: "center" }}>Нет аккаунта? <Link to={"/register" + (sp.get("next") ? "?next=" + encodeURIComponent(sp.get("next")!) : "")}>Зарегистрироваться</Link></p>}
       </form>

@@ -214,10 +214,16 @@ func (s *Server) oauthFinish(w http.ResponseWriter, r *http.Request, provider, s
 		fail("blocked")
 		return
 	}
-	// вход через Google второй защиты не требует: у Google своя проверка (опасные действия всё равно подтверждаются)
-	if err := s.setSession(w, r, u, false); err != nil {
+	// после Google — тот же второй шаг, что и после пароля: если включены Face ID / отпечаток или Google Authenticator,
+	// сеанс ждёт подтверждения (иначе доступ к почте Google обходил бы биометрию)
+	mfa := s.needsSecondFactor(r, u)
+	if err := s.setSession(w, r, u, mfa); err != nil {
 		s.Log.Error("oauth session", "err", err)
 		fail("provider")
+		return
+	}
+	if mfa {
+		http.Redirect(w, r, "/login?step=2fa&next="+url.QueryEscape(st.Next), http.StatusFound)
 		return
 	}
 	s.afterLogin(r, u)

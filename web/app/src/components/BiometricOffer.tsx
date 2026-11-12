@@ -1,6 +1,7 @@
 // Предложение включить вход по Face ID / отпечатку: появляется в кабинете, если на этом устройстве ключа ещё нет.
 // «Не сейчас» прячет его на 30 дней (запоминается в браузере).
 import { useEffect, useState } from "react";
+import { useLocation } from "react-router-dom";
 import { Fingerprint, X } from "lucide-react";
 import { useSession } from "../lib/session";
 import { addPasskey, deviceHasPasskey, deviceName, markDevicePasskey, passkeyError, platformBiometrics } from "../lib/webauthn";
@@ -17,16 +18,20 @@ export function BiometricOffer() {
   const toast = useToast();
   const [show, setShow] = useState(false);
   const [busy, setBusy] = useState(false);
+  const { pathname } = useLocation();
+  // не мешаем первому пути: предлагаем, когда человек уже выбрал копилку (и прошёл лист ожидания),
+  // не на анкете и не в мастере копилки; на демо-счёте биометрия не настраивается
+  const ready = !!me?.user && !me.demo && (me.plans || 0) > 0 && !/^\/app\/(onboarding|plans\/new)/.test(pathname);
   // предлагаем, только если на этом устройстве есть датчик (Face ID, Touch ID, отпечаток, Windows Hello)
   // и ключа на нём ещё нет; если биометрия включена на другом устройстве — предлагаем добавить и это
   useEffect(() => {
-    if (!me?.user || deviceHasPasskey() || dismissedRecently()) return;
+    if (!ready || deviceHasPasskey() || dismissedRecently()) return;
     let alive = true, t = 0;
     platformBiometrics().then((ok) => { if (ok && alive) t = window.setTimeout(() => setShow(true), 1500); });
     return () => { alive = false; clearTimeout(t); };
-  }, [me?.user]);
+  }, [ready]);
   const elsewhere = (me?.passkeys || 0) > 0;
-  if (!show) return null;
+  if (!show || !ready) return null;
   const later = () => { try { localStorage.setItem(KEY, String(Date.now())); } catch { /* */ } setShow(false); };
   return (
     <div className="bio-offer" role="dialog" aria-label="Вход по Face ID">

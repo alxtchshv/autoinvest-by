@@ -3,6 +3,7 @@ package notify
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/tls"
 	"fmt"
 	"log/slog"
@@ -209,6 +210,7 @@ func (m *Mailer) Send(to, subject, body string) error {
 		"Content-Type: text/plain; charset=utf-8",
 		"Content-Transfer-Encoding: 8bit",
 		"Date: " + time.Now().Format(time.RFC1123Z),
+		"Message-ID: " + messageID(fromAddr), // без него Gmail и Mail.ru чаще отправляют письмо в спам
 	}
 	msg := strings.Join(headers, "\r\n") + "\r\n\r\n" + strings.ReplaceAll(body, "\n", "\r\n")
 	var a smtp.Auth
@@ -225,6 +227,16 @@ func (m *Mailer) Send(to, subject, body string) error {
 		m.log.Error("smtp", "to", to, "err", err)
 	}
 	return err
+}
+
+func messageID(from string) string {
+	host := "autoinvest.local"
+	if i := strings.LastIndex(from, "@"); i >= 0 {
+		host = from[i+1:]
+	}
+	b := make([]byte, 12)
+	rand.Read(b)
+	return fmt.Sprintf("<%d.%x@%s>", time.Now().UnixNano(), b, host)
 }
 
 // sendImplicitTLS — SMTP поверх TLS с первого байта (порт 465).

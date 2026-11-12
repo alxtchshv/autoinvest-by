@@ -475,13 +475,13 @@ function Journal() {
 // Face ID / Touch ID / отпечаток (WebAuthn): второй шаг входа и подтверждение опасных действий одним касанием.
 function PasskeysSection() {
   const toast = useToast();
-  const { reload: reloadMe } = useSession();
+  const { me, reload: reloadMe } = useSession();
   const d = useLoad(() => api.get<{ passkeys: { id: number; name: string; created_at: number; last_used_at: number | null }[] }>("/me/passkeys"), []);
   const [busy, setBusy] = useState(false);
   const supported = passkeysSupported();
   const add = async () => {
     setBusy(true);
-    try { await addPasskey(deviceName()); d.reload(); reloadMe(); toast("Устройство добавлено — теперь можно подтверждать Face ID или отпечатком"); }
+    try { await addPasskey(deviceName(), me?.user?.id); d.reload(); reloadMe(); toast("Устройство добавлено — теперь можно подтверждать Face ID или отпечатком"); }
     catch (e: any) { toast(passkeyError(e), "error"); }
     finally { setBusy(false); }
   };

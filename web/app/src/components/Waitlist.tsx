@@ -85,7 +85,8 @@ export function WaitlistHomeCard() {
     if (config?.launch !== "waitlist" || me?.demo) return;
     api.get<{ position: number }>("/waitlist").then((r) => setPos(r.position)).catch(() => null);
   }, [config?.launch, me?.demo]);
-  if (config?.launch !== "waitlist" || me?.demo) return null;
+  // демо-счёт — после анкеты и копилки: без копилки на главной и так есть «Подберём копилку за 4 вопроса»
+  if (config?.launch !== "waitlist" || me?.demo || !me?.plans) return null;
   return (
     <section className="sheet wl-home">
       <div>

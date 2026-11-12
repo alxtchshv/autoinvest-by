@@ -9,8 +9,8 @@ import { Button, useToast } from "./ui";
 
 const KEY = "ai_pk_offer";
 
-function dismissedRecently() {
-  try { return Date.now() - Number(localStorage.getItem(KEY) || 0) < 30 * 86400_000; } catch { return true; }
+function dismissedRecently(uid: number) {
+  try { return Date.now() - Number(localStorage.getItem(`${KEY}:${uid}`) || 0) < 30 * 86400_000; } catch { return true; }
 }
 
 export function BiometricOffer() {
@@ -25,14 +25,15 @@ export function BiometricOffer() {
   // предлагаем, только если на этом устройстве есть датчик (Face ID, Touch ID, отпечаток, Windows Hello)
   // и ключа на нём ещё нет; если биометрия включена на другом устройстве — предлагаем добавить и это
   useEffect(() => {
-    if (!ready || deviceHasPasskey() || dismissedRecently()) return;
+    const uid = me?.user?.id || 0;
+    if (!ready || deviceHasPasskey(uid) || dismissedRecently(uid)) return;
     let alive = true, t = 0;
     platformBiometrics().then((ok) => { if (ok && alive) t = window.setTimeout(() => setShow(true), 1500); });
     return () => { alive = false; clearTimeout(t); };
   }, [ready]);
   const elsewhere = (me?.passkeys || 0) > 0;
   if (!show || !ready) return null;
-  const later = () => { try { localStorage.setItem(KEY, String(Date.now())); } catch { /* */ } setShow(false); };
+  const later = () => { try { localStorage.setItem(`${KEY}:${me?.user?.id}`, String(Date.now())); } catch { /* */ } setShow(false); };
   return (
     <div className="bio-offer" role="dialog" aria-label="Вход по Face ID">
       <button type="button" className="bio-x" aria-label="Закрыть" onClick={later}><X /></button>
@@ -44,10 +45,10 @@ export function BiometricOffer() {
       <div className="row g8">
         <Button variant="primary" size="sm" busy={busy} onClick={async () => {
           setBusy(true);
-          try { await addPasskey(deviceName()); reload(); setShow(false); toast("Готово — теперь вход одним касанием"); }
+          try { await addPasskey(deviceName(), me?.user?.id); reload(); setShow(false); toast("Готово — теперь вход одним касанием"); }
           catch (e: any) {
             // ключ этого устройства уже есть в аккаунте (добавлен раньше) — просто запоминаем и не предлагаем
-            if (e?.name === "InvalidStateError") { markDevicePasskey(); setShow(false); toast("Face ID на этом устройстве уже включён"); }
+            if (e?.name === "InvalidStateError") { markDevicePasskey(me?.user?.id); setShow(false); toast("Face ID на этом устройстве уже включён"); }
             else toast(passkeyError(e), "error");
           }
           finally { setBusy(false); }

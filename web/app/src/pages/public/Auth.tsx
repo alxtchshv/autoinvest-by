@@ -71,14 +71,14 @@ export function Login() {
     setKeyBusy(true); s.reset();
     try { setMe(await usePasskey("login")); } catch (e: any) { if (!auto) s.setError(passkeyError(e)); } finally { setKeyBusy(false); }
   };
-  const maybeAutoKey = (ways?: { passkey: boolean }) => {
-    if (autoKey.current || !ways?.passkey || !passkeysSupported() || !deviceHasPasskey()) return;
+  const maybeAutoKey = (ways?: { passkey: boolean }, uid?: number) => {
+    if (autoKey.current || !ways?.passkey || !passkeysSupported() || !deviceHasPasskey(uid)) return;
     autoKey.current = true;
     runKey(true);
   };
   useEffect(() => {
     if (me?.user) nav(safeNext(sp.get("next")), { replace: true });
-    if (me?.mfa_required) { setMfa(true); if (me.mfa) { setMfaWays(me.mfa); maybeAutoKey(me.mfa); } }
+    if (me?.mfa_required) { setMfa(true); if (me.mfa) { setMfaWays(me.mfa); maybeAutoKey(me.mfa, me.mfa_uid); } }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [me, nav, sp]);
   // Chrome, Edge и Android предлагают сохранить пароль через Credential Management API; Safari и iOS — сами по отправке формы
@@ -90,7 +90,7 @@ export function Login() {
   };
   const finish = (r: Me | undefined) => {
     if (r && (r.user || r.mfa_required)) savePassword();
-    if (r?.mfa_required) { setMfa(true); if (r.mfa) { setMfaWays(r.mfa); maybeAutoKey(r.mfa); } return; }
+    if (r?.mfa_required) { setMfa(true); if (r.mfa) { setMfaWays(r.mfa); maybeAutoKey(r.mfa, r.mfa_uid); } return; }
     if (r) setMe(r);
   };
   const onSubmit = async (e: FormEvent) => {

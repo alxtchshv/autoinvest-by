@@ -206,3 +206,30 @@ func TestAdminBlockReasonAndDelete(t *testing.T) {
 	}
 	newClient(t, srv.URL).register("bad@test.by")
 }
+
+// Путь, как договорились: новый аккаунт через Google — сразу анкета; демо-счёт — только после копилки.
+func TestGoogleSignupGoesToQuizAndDemoNeedsPlan(t *testing.T) {
+	srv, s := newServer(t)
+	s.Cfg.LaunchMode = "waitlist"
+	s.Cfg.OAuthGoogle = "sandbox"
+	c := newClient(t, srv.URL)
+	st := strings.TrimPrefix(c.get("/oauth/google/start").Header.Get("Location"), "/oauth-sandbox?provider=google&state=")
+	if l := c.postForm("/oauth/sandbox/callback", url.Values{"provider": {"google"}, "state": {st}, "email": {"fresh@gmail.test"}}).Header.Get("Location"); l != "/app/onboarding" {
+		t.Fatalf("новый аккаунт через Google попал не на анкету: %s", l)
+	}
+	var ns struct {
+		Notifications []struct{ Kind, Link, Body string }
+	}
+	c.do("GET", "/api/v1/notifications", nil, &ns)
+	if len(ns.Notifications) != 1 || ns.Notifications[0].Link != "/app/onboarding" || !strings.Contains(ns.Notifications[0].Body, "демо-счёте") {
+		t.Fatalf("приветствие: %+v", ns.Notifications)
+	}
+	var e apiErr
+	if code := c.do("POST", "/api/v1/demo/enter", map[string]any{}, &e); code != 409 || e.Code != "need_plan" {
+		t.Fatalf("демо без копилки: %d %+v", code, e)
+	}
+	c.do("POST", "/api/v1/plans", map[string]any{"name": "Отпуск", "amount_kop": 2000, "frequency": "weekly", "weekday": 5, "strategy": "balanced"}, nil)
+	if code := c.do("POST", "/api/v1/demo/enter", map[string]any{}, nil); code != 200 {
+		t.Fatalf("демо с копилкой: %d", code)
+	}
+}

@@ -15,7 +15,6 @@ import (
 	"time"
 
 	"autoinvest/internal/auth"
-	"autoinvest/internal/notify"
 	"autoinvest/internal/oauth"
 	"autoinvest/internal/store"
 )
@@ -224,6 +223,10 @@ func (s *Server) oauthFinish(w http.ResponseWriter, r *http.Request, provider, s
 		fail("provider")
 		return
 	}
+	// новый аккаунт (или не прошедший анкету) — сначала 4 вопроса, как при регистрации по почте
+	if u.OnboardedAt == nil && u.Role == "user" && st.Next == "/app" {
+		st.Next = "/app/onboarding"
+	}
 	if mfa {
 		http.Redirect(w, r, "/login?step=2fa&next="+url.QueryEscape(st.Next), http.StatusFound)
 		return
@@ -269,8 +272,7 @@ func (s *Server) oauthUser(r *http.Request, provider string, p *oauth.Profile) (
 		s.St.RecordConsent(ctx, u.ID, kind, LegalVersion)
 	}
 	s.St.Audit(ctx, u.ID, u.ID, "auth.register", providerNames[provider], clientIP(r))
-	s.N.Send(ctx, u.ID, notify.Message{Kind: "welcome", Title: "Добро пожаловать в AutoInvest",
-		Body: "Создайте первую копилку: выберите сумму, расписание и план — дальше всё произойдёт само.", Link: "/app/plans/new"})
+	s.N.Send(ctx, u.ID, s.welcomeMessage())
 	return u, nil
 }
 

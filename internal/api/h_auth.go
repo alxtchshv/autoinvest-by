@@ -38,6 +38,16 @@ func normPhone(p string) string {
 	return "+" + d
 }
 
+// welcomeMessage — первое уведомление нового аккаунта: куда идти дальше.
+func (s *Server) welcomeMessage() notify.Message {
+	m := notify.Message{Kind: "welcome", Title: "Добро пожаловать в AutoInvest",
+		Body: "Ответьте на 4 вопроса — подберём копилку под вашу цель. Дальше пополнения пойдут сами.", Link: "/app/onboarding"}
+	if s.waitlistMode() {
+		m.Body = "Ответьте на 4 вопроса — подберём копилку под вашу цель. Пока мы готовим запуск, всё можно попробовать на демо-счёте с виртуальными деньгами."
+	}
+	return m
+}
+
 // blockedMessage — что видит заблокированный человек при попытке входа: причина от администратора и куда писать.
 func blockedMessage(u *store.User) string {
 	msg := "Аккаунт заблокирован."
@@ -249,8 +259,7 @@ func (s *Server) registerConfirm(w http.ResponseWriter, r *http.Request) {
 			s.Log.Error("consent", "user", u.ID, "err", err)
 		}
 	}
-	s.N.Send(r.Context(), u.ID, notify.Message{Kind: "welcome", Title: "Добро пожаловать в AutoInvest",
-		Body: "Создайте первую копилку: выберите сумму, расписание и план — дальше всё произойдёт само.", Link: "/app/plans/new"})
+	s.N.Send(r.Context(), u.ID, s.welcomeMessage())
 	if err := s.setSession(w, r, u, false); err != nil {
 		s.internal(w, r, err)
 		return
@@ -315,7 +324,8 @@ func (s *Server) finishLogin(w http.ResponseWriter, r *http.Request, u *store.Us
 		return
 	}
 	if mfa {
-		writeJSON(w, 200, map[string]any{"mfa_required": true, "mfa": s.mfaMethods(r, u)})
+		// mfa_uid — чтобы браузер знал, есть ли на этом устройстве ключ именно этого аккаунта (первый фактор уже пройден)
+		writeJSON(w, 200, map[string]any{"mfa_required": true, "mfa": s.mfaMethods(r, u), "mfa_uid": u.ID})
 		return
 	}
 	s.afterLogin(r, u)
@@ -409,7 +419,7 @@ func (s *Server) me(w http.ResponseWriter, r *http.Request) {
 		if sess := currentSession(r); sess != nil && sess.MFAPending {
 			resp := map[string]any{"user": nil, "mfa_required": true}
 			if pu, err := s.St.UserByID(r.Context(), sess.UserID); err == nil {
-				resp["mfa"] = s.mfaMethods(r, pu)
+				resp["mfa"], resp["mfa_uid"] = s.mfaMethods(r, pu), pu.ID
 			}
 			writeJSON(w, 200, resp)
 			return

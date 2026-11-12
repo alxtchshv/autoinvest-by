@@ -17,7 +17,7 @@ const ub64 = (buf: ArrayBuffer | null) => {
 export const passkeysSupported = () => typeof window !== "undefined" && !!window.PublicKeyCredential && !!navigator.credentials;
 
 /** Добавить ключ на этом устройстве. */
-export async function addPasskey(name: string) {
+export async function addPasskey(name: string, uid?: number) {
   const opts = await api.post<{ publicKey: any }>("/me/passkeys/begin");
   const pk = opts.publicKey;
   pk.challenge = b64(pk.challenge);
@@ -30,7 +30,7 @@ export async function addPasskey(name: string) {
     response: { clientDataJSON: ub64(r.clientDataJSON), attestationObject: ub64(r.attestationObject), transports: r.getTransports?.() || [] },
   };
   const r2 = await api.post(`/me/passkeys/finish?name=${encodeURIComponent(name)}`, body);
-  markDevicePasskey();
+  markDevicePasskey(uid);
   return r2;
 }
 
@@ -48,14 +48,24 @@ export async function usePasskey(kind: "login" | "stepup") {
     response: { clientDataJSON: ub64(r.clientDataJSON), authenticatorData: ub64(r.authenticatorData), signature: ub64(r.signature), userHandle: ub64(r.userHandle) },
   };
   const res = await api.post<any>(`${base}/finish`, body);
-  markDevicePasskey();
+  markDevicePasskey(res?.user?.id);
   return res;
 }
 
-// На этом устройстве уже есть ключ входа — показываем «Войти по Face ID» на странице входа.
-const PK_FLAG = "ai_pk";
-export const deviceHasPasskey = () => { try { return localStorage.getItem(PK_FLAG) === "1"; } catch { return false; } };
-export const markDevicePasskey = (on = true) => { try { on ? localStorage.setItem(PK_FLAG, "1") : localStorage.removeItem(PK_FLAG); } catch { /* */ } };
+// На этом устройстве есть ключ входа — отдельно для каждого аккаунта: два аккаунта на одном Mac не путаются
+// (раньше был один флаг на браузер, и второму аккаунту отпечаток не предлагался).
+const PK_USERS = "ai_pk_users";
+const pkUsers = (): number[] => { try { return JSON.parse(localStorage.getItem(PK_USERS) || "[]"); } catch { return []; } };
+export const deviceHasPasskey = (uid?: number) => !!uid && pkUsers().includes(uid);
+export const markDevicePasskey = (uid?: number, on = true) => {
+  if (!uid) return;
+  try {
+    const list = pkUsers().filter((x) => x !== uid);
+    if (on) list.push(uid);
+    localStorage.setItem(PK_USERS, JSON.stringify(list.slice(-20)));
+    localStorage.removeItem("ai_pk"); // старый общий флаг
+  } catch { /* */ }
+};
 
 /** Есть ли на устройстве встроенная биометрия (Face ID, Touch ID, отпечаток, Windows Hello). */
 export async function platformBiometrics() {

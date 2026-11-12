@@ -124,6 +124,13 @@ func (s *Server) demoEnter(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, s.mePayload(r, u))
 		return
 	}
+	// путь как договорились: анкета → копилка → лист ожидания и демо-счёт с копией этой копилки
+	var plans int
+	s.DB.QueryRowContext(r.Context(), `SELECT COUNT(*) FROM plans WHERE user_id=? AND status!='closed'`, u.ID).Scan(&plans)
+	if plans == 0 && s.waitlistMode() {
+		writeJSON(w, http.StatusConflict, apiErr{Error: "Сначала подберите копилку — демо-счёт откроется сразу с ней", Code: "need_plan"})
+		return
+	}
 	if !s.waitlistMode() || s.Sandbox == nil {
 		writeErr(w, http.StatusNotFound, "Демо-счёт сейчас недоступен")
 		return

@@ -38,6 +38,15 @@ func normPhone(p string) string {
 	return "+" + d
 }
 
+// blockedMessage — что видит заблокированный человек при попытке входа: причина от администратора и куда писать.
+func blockedMessage(u *store.User) string {
+	msg := "Аккаунт заблокирован."
+	if r := strings.TrimRight(strings.TrimSpace(u.BlockReason), ". "); r != "" {
+		msg += " Причина: " + r + "."
+	}
+	return msg + " Если это ошибка — напишите в поддержку: support@autoinvest.by"
+}
+
 func validEmail(e string) bool {
 	a, err := mail.ParseAddress(e)
 	return err == nil && a.Address == e && strings.Contains(e, ".") && len(e) <= 200
@@ -292,7 +301,7 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if u.Status == "blocked" {
-		writeErr(w, http.StatusForbidden, "Аккаунт заблокирован. Напишите в поддержку: support@autoinvest.by")
+		writeErr(w, http.StatusForbidden, blockedMessage(u))
 		return
 	}
 	s.finishLogin(w, r, u)

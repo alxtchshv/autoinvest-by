@@ -129,7 +129,7 @@ func (s *Server) phoneLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if u.Status == "blocked" {
-		writeErr(w, http.StatusForbidden, "Аккаунт заблокирован. Напишите в поддержку: support@autoinvest.by")
+		writeErr(w, http.StatusForbidden, blockedMessage(u))
 		return
 	}
 	s.finishLogin(w, r, u)

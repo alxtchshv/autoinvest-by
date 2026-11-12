@@ -21,7 +21,7 @@ export type Config = {
 };
 
 export type User = {
-  id: number; email: string; email_verified: boolean; demo_of?: number | null; waitlist_at?: number | null; utm_source?: string; utm_campaign?: string; bonus_pro_days?: number; phone: string; phone_verified?: boolean; has_password?: boolean; name: string; role: "user" | "support" | "admin";
+  id: number; email: string; email_verified: boolean; demo_of?: number | null; waitlist_at?: number | null; utm_source?: string; utm_campaign?: string; bonus_pro_days?: number; block_reason?: string; phone: string; phone_verified?: boolean; has_password?: boolean; name: string; role: "user" | "support" | "admin";
   status: string; totp_enabled: boolean; tier: string; pro_until: number | null; pro_autorenew: boolean; pro_period: string;
   referral_code: string; risk_profile: string; kyc_status: "none" | "pending" | "approved" | "rejected"; telegram_username: string;
   notify_email: boolean; notify_telegram: boolean; notify_market: boolean; created_at: number; last_login_at: number | null; onboarded_at: number | null;

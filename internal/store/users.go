@@ -72,6 +72,7 @@ type User struct {
 	UTMSource        string `json:"utm_source"`
 	UTMCampaign      string `json:"utm_campaign"`
 	BonusProDays     int    `json:"bonus_pro_days"` // подарок к запуску за идеи и найденные ошибки
+	BlockReason      string `json:"block_reason"`   // почему заблокирован: показываем при попытке входа
 }
 
 // IsDemo — это демо-счёт (теневой пользователь с виртуальными деньгами).
@@ -87,7 +88,7 @@ func (u *User) IsStaff() bool { return u.Role == "admin" || u.Role == "support" 
 const userCols = `id, email, email_verified_at, phone, name, password_hash, role, status, totp_secret, totp_enabled,
 recovery_codes, tier, pro_until, pro_autorenew, pro_period, referral_code, referred_by, referral_rewarded, risk_profile,
 kyc_status, telegram_chat_id, telegram_username, notify_email, notify_telegram, notify_market, created_at, last_login_at, totp_last_step, onboarded_at, phone_verified_at,
-demo_of, waitlist_at, utm_source, utm_campaign, bonus_pro_days`
+demo_of, waitlist_at, utm_source, utm_campaign, bonus_pro_days, block_reason`
 
 // userColsU — те же колонки с префиксом таблицы u (для JOIN).
 var userColsU = "u." + strings.ReplaceAll(strings.Join(strings.Fields(userCols), " "), ", ", ", u.")
@@ -101,7 +102,7 @@ func scanUser(r scanner) (*User, error) {
 		&u.TOTPEnabled, &u.RecoveryCodes, &u.Tier, &proUntil, &u.ProAutorenew, &u.ProPeriod, &u.ReferralCode, &refBy,
 		&u.ReferralRewarded, &u.RiskProfile, &u.KYCStatus, &tg, &u.TelegramUsername, &u.NotifyEmail, &u.NotifyTelegram,
 		&u.NotifyMarket, &u.CreatedAt, &lastLogin, &u.TOTPLastStep, &onboarded, &phoneVerified,
-		&demoOf, &waitlist, &u.UTMSource, &u.UTMCampaign, &u.BonusProDays)
+		&demoOf, &waitlist, &u.UTMSource, &u.UTMCampaign, &u.BonusProDays, &u.BlockReason)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -174,7 +175,7 @@ func (s *Store) UpdateUserFields(ctx context.Context, id int64, fields map[strin
 	allowed := map[string]bool{"name": true, "phone": true, "password_hash": true, "totp_secret": true, "totp_enabled": true,
 		"recovery_codes": true, "tier": true, "pro_until": true, "pro_autorenew": true, "pro_period": true, "risk_profile": true,
 		"kyc_status": true, "telegram_chat_id": true, "telegram_username": true, "notify_email": true, "notify_telegram": true,
-		"notify_market": true, "status": true, "role": true, "email_verified_at": true, "last_login_at": true, "referral_rewarded": true, "email": true, "totp_last_step": true, "onboarded_at": true, "phone_verified_at": true, "waitlist_at": true, "utm_source": true, "utm_campaign": true}
+		"notify_market": true, "status": true, "role": true, "email_verified_at": true, "last_login_at": true, "referral_rewarded": true, "email": true, "totp_last_step": true, "onboarded_at": true, "phone_verified_at": true, "waitlist_at": true, "utm_source": true, "utm_campaign": true, "block_reason": true}
 	var sets []string
 	var args []any
 	for k, v := range fields {

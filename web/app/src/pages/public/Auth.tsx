@@ -24,6 +24,18 @@ function strength(p: string): [number, string] {
   return [s, ["Слишком короткий", "Слабый", "Нормальный", "Хороший", "Надёжный"][s]];
 }
 
+/** Причина блокировки после входа через Google: сервер кладёт её в короткую cookie, читаем один раз. */
+function blockedReason(): string | null {
+  try {
+    const m = document.cookie.match(/(?:^|; )ai_block=([^;]*)/);
+    if (!m) return null;
+    document.cookie = "ai_block=; Max-Age=0; Path=/";
+    return decodeURIComponent(m[1].replace(/\+/g, " "));
+  } catch {
+    return null;
+  }
+}
+
 const OAUTH_ERRORS: Record<string, string> = {
   cancel: "Вход отменён.",
   state: "Сеанс входа устарел. Попробуйте ещё раз.",
@@ -93,6 +105,7 @@ export function Login() {
     }
   };
   const oauthErr = sp.get("oauth_error");
+  const [blockMsg] = useState(() => (oauthErr === "blocked" ? blockedReason() : null));
   return (
     <div className="auth-wrap">
       <form className="auth-card sheet sheet-pad stack g16" method="post" action="/login" autoComplete="on" onSubmit={onSubmit} noValidate>
@@ -100,7 +113,7 @@ export function Login() {
           <h1>{mfa ? "Подтвердите вход" : "Вход"}</h1>
           <p className="muted mt8">{mfa ? (mfaWays.totp ? "Введите 6 цифр из Google Authenticator или код восстановления" : "Подтвердите, что это вы: Face ID, отпечаток или код") : "Рады видеть вас снова"}</p>
         </div>
-        {oauthErr && !mfa && <Notice kind={oauthErr === "cancel" ? "info" : "error"}>{OAUTH_ERRORS[oauthErr] || OAUTH_ERRORS.provider}</Notice>}
+        {oauthErr && !mfa && <Notice kind={oauthErr === "cancel" ? "info" : "error"}>{(oauthErr === "blocked" && blockMsg) || OAUTH_ERRORS[oauthErr] || OAUTH_ERRORS.provider}</Notice>}
         {s.error && !s.field && <Notice kind="error">{s.error}</Notice>}
         {mfa ? (
           <>

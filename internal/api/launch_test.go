@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"net/url"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -146,4 +147,62 @@ func TestDeleteAccountThenSignUpAgain(t *testing.T) {
 	}
 	// и почту можно занять заново
 	newClient(t, srv.URL).register("again@test.by")
+}
+
+// Блокировка — с причиной, которую человек видит при входе (по паролю и через Google);
+// удаление из админки — как самостоятельное: после него та же почта регистрируется заново.
+func TestAdminBlockReasonAndDelete(t *testing.T) {
+	srv, s := newServer(t)
+	s.Cfg.OAuthGoogle = "sandbox"
+	ctx := context.Background()
+	adm := newClient(t, srv.URL)
+	adm.register("boss@test.by")
+	a, _ := s.St.UserByEmail(ctx, "boss@test.by")
+	s.St.UpdateUserFields(ctx, a.ID, map[string]any{"role": "admin"})
+
+	c := newClient(t, srv.URL)
+	c.register("bad@test.by")
+	loc := c.get("/oauth/google/start?mode=link").Header.Get("Location")
+	c.postForm("/oauth/sandbox/callback", url.Values{"provider": {"google"}, "state": {strings.TrimPrefix(loc, "/oauth-sandbox?provider=google&state=")}, "email": {"bad@gmail.test"}})
+	u, _ := s.St.UserByEmail(ctx, "bad@test.by")
+	path := "/api/v1/admin/users/" + strconv.FormatInt(u.ID, 10)
+
+	if code := adm.do("POST", path+"/status", map[string]any{"status": "blocked", "reason": "  "}, nil); code == 200 {
+		t.Fatal("заблокировали без причины")
+	}
+	if code := adm.do("POST", path+"/status", map[string]any{"status": "blocked", "reason": "Подозрение на мошенничество."}, nil); code != 200 {
+		t.Fatalf("блокировка: %d", code)
+	}
+	var e apiErr
+	if code := newClient(t, srv.URL).do("POST", "/api/v1/auth/login", map[string]any{"email": "bad@test.by", "password": "parol2026"}, &e); code != 403 ||
+		!strings.Contains(e.Error, "Причина: Подозрение на мошенничество.") || strings.Contains(e.Error, "..") {
+		t.Fatalf("вход заблокированного: %d %q", code, e.Error)
+	}
+	g := newClient(t, srv.URL)
+	st := strings.TrimPrefix(g.get("/oauth/google/start").Header.Get("Location"), "/oauth-sandbox?provider=google&state=")
+	resp := g.postForm("/oauth/sandbox/callback", url.Values{"provider": {"google"}, "state": {st}, "email": {"bad@gmail.test"}})
+	var reason string
+	for _, ck := range resp.Cookies() {
+		if ck.Name == "ai_block" {
+			reason, _ = url.QueryUnescape(ck.Value)
+		}
+	}
+	if !strings.Contains(resp.Header.Get("Location"), "oauth_error=blocked") || !strings.Contains(reason, "мошенничество") {
+		t.Fatalf("Google заблокированного: %s %q", resp.Header.Get("Location"), reason)
+	}
+
+	// удаление: себя и сотрудников нельзя, пользователя — можно
+	if code := adm.do("POST", "/api/v1/admin/users/"+strconv.FormatInt(a.ID, 10)+"/delete", map[string]any{}, nil); code == 200 {
+		t.Fatal("админ удалил сам себя")
+	}
+	if code := adm.do("POST", path+"/delete", map[string]any{}, nil); code != 200 {
+		t.Fatalf("удаление: %d", code)
+	}
+	if code := adm.do("POST", path+"/status", map[string]any{"status": "active"}, nil); code == 200 {
+		t.Fatal("удалённый аккаунт разблокировали обратно")
+	}
+	if n := s.St.CountPasskeys(ctx, u.ID); n != 0 {
+		t.Fatal("ключи остались")
+	}
+	newClient(t, srv.URL).register("bad@test.by")
 }

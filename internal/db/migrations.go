@@ -356,4 +356,6 @@ CREATE TABLE visits (
 	PRIMARY KEY (day, source, campaign)
 );
 `,
+	// причина блокировки — человек видит её при попытке входа
+	`ALTER TABLE users ADD COLUMN block_reason TEXT NOT NULL DEFAULT '';`,
 }

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/csv"
 	"encoding/json"
 	"errors"
@@ -257,7 +258,7 @@ var auditLabels = map[string]string{
 	"auth.password_reset": "Восстановление пароля", "auth.email_verified": "Подтверждена почта", "auth.recovery_code_used": "Использован код восстановления",
 	"security.password_changed": "Смена пароля", "security.2fa_enabled": "Включена двухфакторная защита", "security.2fa_disabled": "Отключена двухфакторная защита",
 	"security.sessions_revoked": "Завершены другие сеансы", "security.session_revoked": "Завершён сеанс", "security.sessions_revoked_all": "Выход на всех устройствах",
-	"security.audit_export": "Выгружен журнал действий", "admin.export": "Сотрудник выгрузил данные", "launch.bonus": "Подарок Pro к запуску", "demo.enter": "Открыт демо-счёт",
+	"security.audit_export": "Выгружен журнал действий", "admin.export": "Сотрудник выгрузил данные", "admin.delete": "Аккаунт удалён администратором", "launch.bonus": "Подарок Pro к запуску", "demo.enter": "Открыт демо-счёт",
 	"card.added": "Привязана карта", "card.removed": "Удалена карта", "card.default": "Изменена основная карта",
 	"plan.created": "Создана копилка", "plan.updated": "Изменена копилка", "plan.paused": "Копилка на паузе", "plan.resumed": "Копилка включена",
 	"plan.withdraw": "Вывод", "plan.closed": "Закрыта копилка",
@@ -321,20 +322,30 @@ func (s *Server) deleteAccount(w http.ResponseWriter, r *http.Request) {
 	if !s.confirmAction(w, r, in.Password, in.Code) {
 		return
 	}
-	plans, _ := s.St.Plans(r.Context(), u.ID, true)
-	for _, p := range plans {
-		if v := s.En.Value(p.Positions); v.ValueKop > 0 || len(p.Positions) > 0 && v.InvestedKop > 0 {
-			writeErr(w, http.StatusConflict, "Сначала выведите деньги из копилки «"+p.Name+"»")
-			return
-		}
-	}
-	var pending int
-	s.DB.QueryRowContext(r.Context(), `SELECT COUNT(*) FROM orders WHERE user_id=? AND status IN ('pending','payout_pending','manual')`, u.ID).Scan(&pending)
-	if pending > 0 {
-		writeErr(w, http.StatusConflict, "Дождитесь завершения операций в обработке")
+	if msg := s.eraseAccount(r.Context(), u); msg != "" {
+		writeErr(w, http.StatusConflict, msg)
 		return
 	}
 	ctx := r.Context()
+	s.St.Audit(ctx, u.ID, u.ID, "account.deleted", "", clientIP(r))
+	s.clearSession(w)
+	writeJSON(w, 200, map[string]bool{"ok": true})
+}
+
+// eraseAccount — удаление аккаунта (сам человек или администратор): копилки закрываются, карты и способы входа отвязываются,
+// персональные данные стираются, история операций остаётся обезличенной. Пусто — удалено; иначе — что мешает.
+func (s *Server) eraseAccount(ctx context.Context, u *store.User) string {
+	plans, _ := s.St.Plans(ctx, u.ID, true)
+	for _, p := range plans {
+		if v := s.En.Value(p.Positions); v.ValueKop > 0 || len(p.Positions) > 0 && v.InvestedKop > 0 {
+			return "Сначала выведите деньги из копилки «" + p.Name + "»"
+		}
+	}
+	var pending int
+	s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM orders WHERE user_id=? AND status IN ('pending','payout_pending','manual')`, u.ID).Scan(&pending)
+	if pending > 0 {
+		return "Дождитесь завершения операций в обработке"
+	}
 	s.DB.ExecContext(ctx, `UPDATE plans SET status='closed', closed_at=?, next_run_at=NULL WHERE user_id=? AND status!='closed'`, store.Now(), u.ID)
 	s.DB.ExecContext(ctx, `UPDATE cards SET status='removed', token='' WHERE user_id=?`, u.ID)
 	s.DB.ExecContext(ctx, `UPDATE users SET status='deleted', email=?, phone='', name='Удалённый пользователь', telegram_chat_id=NULL, totp_secret='', recovery_codes='', updated_at=? WHERE id=?`,
@@ -347,9 +358,7 @@ func (s *Server) deleteAccount(w http.ResponseWriter, r *http.Request) {
 	// демо-счёт уходит вместе с аккаунтом (история операций остаётся, но без связи с человеком)
 	s.DB.ExecContext(ctx, `UPDATE users SET status='deleted', demo_of=NULL, email='deleted-demo+'||id||'@deleted.local' WHERE demo_of=?`, u.ID)
 	s.St.RevokeConsents(ctx, u.ID)
-	s.St.Audit(ctx, u.ID, u.ID, "account.deleted", "", clientIP(r))
-	s.clearSession(w)
-	writeJSON(w, 200, map[string]bool{"ok": true})
+	return ""
 }
 
 // ---------------------------------------------------------------- KYC

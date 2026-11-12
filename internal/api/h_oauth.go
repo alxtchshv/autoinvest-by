@@ -211,6 +211,8 @@ func (s *Server) oauthFinish(w http.ResponseWriter, r *http.Request, provider, s
 		return
 	}
 	if u.Status == "blocked" {
+		// причину передаём странице входа короткой cookie, а не в адресе (адреса попадают в историю и логи)
+		http.SetCookie(w, &http.Cookie{Name: "ai_block", Value: url.QueryEscape(blockedMessage(u)), Path: "/", MaxAge: 120, SameSite: http.SameSiteLaxMode, Secure: s.Cfg.SecureCookies})
 		fail("blocked")
 		return
 	}

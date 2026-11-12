@@ -219,6 +219,7 @@ func (s *Server) routes(m *http.ServeMux) {
 	staff("GET /api/v1/admin/users", s.adminUsers)
 	staff("GET /api/v1/admin/users/{id}", s.adminUser)
 	admin("POST /api/v1/admin/users/{id}/status", s.adminUserStatus)
+	admin("POST /api/v1/admin/users/{id}/delete", s.adminDeleteUser)
 	admin("POST /api/v1/admin/users/{id}/role", s.adminUserRole)
 	admin("POST /api/v1/admin/users/{id}/pro", s.adminGrantPro)
 	staff("GET /api/v1/admin/kyc", s.adminKYC)

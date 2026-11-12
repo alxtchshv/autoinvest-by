@@ -94,6 +94,35 @@ func nz[T any](v []T) []T {
 	return v
 }
 
+// adminDeleteUser — POST /admin/users/{id}/delete: удалить аккаунт (тестовые, по просьбе человека).
+// Как при самостоятельном удалении: деньги в копилках и операции в обработке не дают удалить.
+func (s *Server) adminDeleteUser(w http.ResponseWriter, r *http.Request) {
+	id := pathID(r)
+	if id == currentUser(r).ID {
+		writeErr(w, http.StatusBadRequest, "Нельзя удалить себя")
+		return
+	}
+	u, err := s.St.UserByID(r.Context(), id)
+	if errors.Is(err, store.ErrNotFound) || err == nil && (u.Status == "deleted" || u.IsDemo()) {
+		writeErr(w, http.StatusNotFound, "Пользователь не найден")
+		return
+	}
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	if u.Role != "user" {
+		writeErr(w, http.StatusConflict, "Сначала смените роль на «Пользователь»")
+		return
+	}
+	if msg := s.eraseAccount(r.Context(), u); msg != "" {
+		writeErr(w, http.StatusConflict, "У пользователя: "+strings.ToLower(msg[:1])+msg[1:])
+		return
+	}
+	s.St.Audit(r.Context(), u.ID, currentUser(r).ID, "admin.delete", "", clientIP(r))
+	writeJSON(w, 200, map[string]bool{"ok": true})
+}
+
 func (s *Server) adminUserStatus(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Status string `json:"status"`
@@ -111,7 +140,22 @@ func (s *Server) adminUserStatus(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "Нельзя заблокировать себя")
 		return
 	}
-	if err := s.St.UpdateUserFields(r.Context(), id, map[string]any{"status": in.Status}); err != nil {
+	if t, err := s.St.UserByID(r.Context(), id); err != nil || t.Status == "deleted" {
+		writeErr(w, http.StatusNotFound, "Пользователь не найден или удалён")
+		return
+	}
+	in.Reason = strings.TrimSpace(in.Reason)
+	if in.Status == "blocked" && in.Reason == "" {
+		writeFieldErr(w, "reason", "Укажите причину — человек увидит её при попытке войти")
+		return
+	}
+	if r := []rune(in.Reason); len(r) > 300 {
+		in.Reason = string(r[:300])
+	}
+	if in.Status == "active" {
+		in.Reason = ""
+	}
+	if err := s.St.UpdateUserFields(r.Context(), id, map[string]any{"status": in.Status, "block_reason": in.Reason}); err != nil {
 		s.internal(w, r, err)
 		return
 	}

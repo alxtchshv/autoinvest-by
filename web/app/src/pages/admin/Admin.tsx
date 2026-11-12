@@ -232,6 +232,7 @@ export function AdminUser() {
   const { id } = useParams();
   const { me } = useSession();
   const toast = useToast();
+  const nav = useNavigate();
   const { data, error, loading, reload } = useLoad(() => api.get<{ user: User; is_pro: boolean; plans: Plan[]; cards: Card[]; orders: Order[]; kyc: KYC | null; audit: { action: string; details: string; ip: string; created_at: number }[]; tickets: Ticket[]; telegram: { id: number; dir: "in" | "out"; kind: string; text: string; created_at: number }[] }>(`/admin/users/${id}`), [id]);
   const [days, setDays] = useState("30");
   useTitle(data?.user.name || "Пользователь");
@@ -248,10 +249,20 @@ export function AdminUser() {
       <div>
         <Link to="/admin/users" className="back"><ArrowLeft />Пользователи</Link>
         <div className="page-head" style={{ marginBottom: 0 }}>
-          <div><h1>{u.name}</h1><p>{u.email}{u.phone ? ` · ${u.phone}` : ""} · ID {u.id} · с {dateNum(u.created_at)}</p></div>
+          <div><h1>{u.name}</h1><p>{u.email}{u.phone ? ` · ${u.phone}` : ""} · ID {u.id} · с {dateNum(u.created_at)}</p>
+            {u.status === "blocked" && <p className="small down mt4">Заблокирован{u.block_reason ? `: ${u.block_reason}` : " (причина не указана)"}</p>}</div>
           {isAdmin && (
             <div className="row g8 wrap">
-              {u.status === "blocked" ? <Button size="sm" onClick={() => act("status", { status: "active" }, "Разблокирован")}>Разблокировать</Button> : <Button size="sm" variant="danger" onClick={() => { const r = prompt("Причина блокировки"); if (r !== null) act("status", { status: "blocked", reason: r }, "Заблокирован"); }}>Заблокировать</Button>}
+              {u.status === "blocked" ? <Button size="sm" onClick={() => act("status", { status: "active" }, "Разблокирован")}>Разблокировать</Button> : <Button size="sm" onClick={() => {
+                const r = prompt("Причина блокировки — её увидит пользователь при попытке войти");
+                if (r === null) return;
+                if (!r.trim()) { toast("Укажите причину блокировки", "error"); return; }
+                act("status", { status: "blocked", reason: r.trim() }, "Заблокирован");
+              }}>Заблокировать</Button>}
+              {u.role === "user" && <Button size="sm" variant="danger" onClick={async () => {
+                if (!confirm(`Удалить аккаунт ${u.email}?\n\nКопилки закроются, карты, Google, Face ID и Telegram отвяжутся, личные данные сотрутся. Отменить нельзя. Почтой и Google можно будет зарегистрироваться заново.`)) return;
+                try { await api.post(`/admin/users/${u.id}/delete`, {}); toast("Аккаунт удалён"); nav("/admin/users"); } catch (e: any) { toast(e.message, "error"); }
+              }}>Удалить аккаунт</Button>}
               <select className="select" style={{ height: 34, width: 150 }} value={u.role} onChange={(e) => act("role", { role: e.target.value }, "Роль изменена")} aria-label="Роль">
                 <option value="user">Пользователь</option><option value="support">Поддержка</option><option value="admin">Администратор</option>
               </select>

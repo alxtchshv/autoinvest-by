@@ -44,6 +44,11 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
     if (res.status === 401 && path !== "/auth/me" && !path.startsWith("/auth/")) {
       window.dispatchEvent(new CustomEvent("ai:unauthorized"));
     }
+    // до запуска оплаты закрыты: показываем окно листа ожидания вместо ошибки
+    if (data?.code === "waitlist") {
+      window.dispatchEvent(new CustomEvent("ai:waitlist", { detail: { position: data.position } }));
+      throw new ApiError(res.status, "", undefined, "waitlist");
+    }
     throw new ApiError(res.status, data?.error || "Ошибка " + res.status, data?.field, data?.code);
   }
   return data as T;

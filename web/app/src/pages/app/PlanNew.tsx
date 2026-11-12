@@ -216,7 +216,7 @@ export default function PlanNew() {
 
   const create = async (ack = false) => {
     try {
-      const r = await s.submit(() => api.post<{ plan: Plan; topup_error: string }>("/plans", {
+      const r = await s.submit(() => api.post<{ plan: Plan; topup_error: string; waitlist?: { position: number } }>("/plans", {
         name: name.trim(), icon, goal_kop: goalKop || undefined, goal_date: goalDate || undefined, amount_kop: amountKop,
         frequency: sched.frequency, weekday: sched.weekday, monthday: sched.monthday, run_minute: sched.run_minute,
         strategy, allocations: strategy === "custom" ? allocs : undefined, card_id: cardId ?? undefined, dip_enabled: dip,
@@ -224,6 +224,12 @@ export default function PlanNew() {
       }));
       if (!r) return;
       reload();
+      if (r.waitlist) {
+        // до запуска: копилка сохранена и ждёт, человек — в листе ожидания (окно с демо-счётом)
+        nav(`/app/plans/${r.plan.id}`, { replace: true });
+        window.dispatchEvent(new CustomEvent("ai:waitlist", { detail: { position: r.waitlist.position } }));
+        return;
+      }
       if (r.topup_error) toast("Копилка создана, но первое пополнение не прошло: " + r.topup_error, "error");
       else toast(topup && cardId ? `Копилка «${r.plan.name}» создана и пополнена` : `Копилка «${r.plan.name}» создана`);
       nav(`/app/plans/${r.plan.id}`, { replace: true });
@@ -236,7 +242,9 @@ export default function PlanNew() {
   const tomorrow = isoDate(new Date(Date.now() + 86400000));
   const maxDate = isoDate(addMonths(new Date(), 12 * 30));
   const st = config?.strategies.find((x) => x.id === strategy);
-  const titles = ["На что копим", "Какой план", "Сколько и когда", "Карта и запуск"];
+  // до запуска (лист ожидания) настоящий аккаунт не привязывает карту на этом шаге
+  const waiting = config?.launch === "waitlist" && !me?.demo;
+  const titles = ["На что копим", "Какой план", "Сколько и когда", waiting ? "Проверим и запустим" : "Карта и запуск"];
   return (
     <div className="wizard">
       <Link to="/app/plans" className="back"><ArrowLeft />Копилки</Link>
@@ -311,7 +319,7 @@ export default function PlanNew() {
           )}
           {step === 3 && (
             <>
-              <Field label="С какой карты пополнять">
+              {!waiting && <Field label="С какой карты пополнять">
                 {cards.data?.cards.length ? (
                   <div className="stack g8">
                     {cards.data.cards.map((c) => (
@@ -324,14 +332,14 @@ export default function PlanNew() {
                 ) : (
                   <Notice kind="warn">Карта не привязана — копилка будет создана на паузе. <Link to="/app/cards">Привязать карту</Link></Notice>
                 )}
-              </Field>
+              </Field>}
               <dl className="kv">
                 <dt>Копилка</dt><dd>{name}{goalKop ? ` · цель ${byn(goalKop)}` : ""}</dd>
                 <dt>Пополнение</dt><dd>{byn(amountKop)} · {sched.frequency === "manual" ? "вручную" : freqLabel[sched.frequency].toLowerCase()}</dd>
                 <dt>План</dt><dd>{st ? planName(st.name) : "Свой состав"} · {allocs.map((a) => `${config?.assets.find((x) => x.symbol === a.asset)?.name || a.asset} ${a.weight_bp / 100}%`).join(" · ")}</dd>
                 <dt>Комиссия</dt><dd>{((isPro ? config!.fee_pro_bp : config!.fee_free_bp) / 100).toString().replace(".", ",")}% с пополнения, спред {(config!.spread_bp / 100).toString().replace(".", ",")}%</dd>
               </dl>
-              {cardId && (
+              {cardId && !waiting && (
                 <label className="check"><input type="checkbox" checked={topup} onChange={(e) => setTopup(e.target.checked)} /><span>Пополнить сразу на {byn(amountKop)}, не дожидаясь расписания</span></label>
               )}
               {s.error && !riskAsk && <Notice kind="error">{s.error}</Notice>}
@@ -343,7 +351,7 @@ export default function PlanNew() {
           {step < 3 ? (
             <Button variant="primary" disabled={!stepsOk[step]} onClick={() => setStep(step + 1)}>Дальше</Button>
           ) : (
-            <Button variant="primary" busy={s.busy} onClick={() => create(false)}>{cardId ? "Запустить копилку" : "Создать копилку"}</Button>
+            <Button variant="primary" busy={s.busy} onClick={() => create(false)}>{cardId || waiting ? "Запустить копилку" : "Создать копилку"}</Button>
           )}
         </div>
       </section>

@@ -6,6 +6,7 @@ import { useSession } from "../../lib/session";
 import type { Me } from "../../lib/types";
 import { Button, Field, Input, Notice, Segmented } from "../../components/ui";
 import { OrLine, SocialButtons, SocialConsent } from "../../components/SocialLogin";
+import { getUtm } from "../../lib/utm";
 import { Fingerprint } from "lucide-react";
 import { passkeyError, passkeysSupported, usePasskey } from "../../lib/webauthn";
 
@@ -194,7 +195,7 @@ export function Register() {
     e.preventDefault();
     try {
       if (!sent) {
-        const r = await s.submit(() => api.post<{ test_code?: string }>("/auth/register/start", { name: f.name, email: f.email, password: f.password, ref, accept_offer: f.offer, accept_privacy: f.privacy }));
+        const r = await s.submit(() => api.post<{ test_code?: string }>("/auth/register/start", { name: f.name, email: f.email, password: f.password, ref, accept_offer: f.offer, accept_privacy: f.privacy, ...getUtm() }));
         if (r) setSent(r);
         return;
       }

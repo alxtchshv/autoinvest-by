@@ -81,6 +81,7 @@ export function AdminOverview() {
   return (
     <div className="stack g16">
       <div className="page-head" style={{ marginBottom: 4 }}><h1>Обзор</h1></div>
+      <LaunchFunnel />
       {(o.pending_kyc > 0 || o.open_tickets > 0 || o.pending_payouts > 0) && (
         <div className="row g8 wrap">
           {o.open_tickets > 0 && <Link to="/admin/tickets?status=open" className="btn btn-secondary btn-sm">Обращений без ответа: {o.open_tickets}</Link>}
@@ -289,6 +290,9 @@ export function AdminUser() {
             <dt>2FA</dt><dd>{u.totp_enabled ? "Включена" : "Нет"}</dd>
             <dt>Telegram</dt><dd>{u.telegram_username ? "@" + u.telegram_username : "—"}</dd>
             <dt>Риск-профиль</dt><dd>{u.risk_profile || "—"}</dd>
+            <dt>Лист ожидания</dt><dd>{u.waitlist_at ? dateNum(u.waitlist_at) : "—"}</dd>
+            <dt>Источник</dt><dd>{u.utm_source ? `${u.utm_source}${u.utm_campaign ? " · " + u.utm_campaign : ""}` : "прямой заход"}</dd>
+            <dt>Pro к запуску</dt><dd>{u.bonus_pro_days ? `+${u.bonus_pro_days} дн.` : "—"}</dd>
             <dt>Последний вход</dt><dd>{u.last_login_at ? ago(u.last_login_at) : "—"}</dd>
             <dt>Карты</dt><dd>{d.cards.map((c) => `${c.brand} •• ${c.last4}`).join(", ") || "—"}</dd>
           </dl>
@@ -464,6 +468,7 @@ export function AdminTicket() {
           <Button size="sm" onClick={async () => { await api.post(`/admin/tickets/${t.id}/status`, { status: t.status === "closed" ? "open" : "closed" }); reload(); }}>{t.status === "closed" ? "Открыть снова" : "Закрыть"}</Button>
         </div>
       </div>
+      {(t.category === "idea" || t.category === "bug") && <RewardBar userId={t.user_id} category={t.category} />}
       <section className="sheet sheet-pad"><ChatView ticket={t} mineIsStaff /></section>
       <form className="sheet sheet-pad stack g12" onSubmit={async (e) => { e.preventDefault(); try { await s.submit(() => api.post(`/admin/tickets/${t.id}/reply`, { body })); setBody(""); reload(); } catch { /* */ } }}>
         <textarea className="textarea" placeholder="Ответ клиенту — придёт в приложение, на почту и в Telegram" value={body} onChange={(e) => setBody(e.target.value)} aria-label="Ответ" />
@@ -471,6 +476,60 @@ export function AdminTicket() {
         <div className="row" style={{ justifyContent: "flex-end" }}><Button type="submit" variant="primary" busy={s.busy} disabled={!body.trim()}>Ответить</Button></div>
       </form>
     </div>
+  );
+}
+
+// Награда за полезную идею или найденную ошибку: дни Pro начислятся при запуске.
+function RewardBar({ userId, category }: { userId: number; category: string }) {
+  const toast = useToast();
+  const [busy, setBusy] = useState(0);
+  const give = async (days: number) => {
+    setBusy(days);
+    try {
+      const r = await api.post<{ bonus_pro_days: number }>(`/admin/users/${userId}/bonus`, { days, reason: category === "idea" ? "идея" : "ошибка" });
+      toast(`Подарено +${days} дн. Pro, всего к запуску ${r.bonus_pro_days} дн.`);
+    } catch (e: any) { toast(e.message, "error"); } finally { setBusy(0); }
+  };
+  return (
+    <section className="sheet sheet-pad row between wrap g12 reward-bar">
+      <span>{category === "idea" ? "Идея по улучшению" : "Сообщение об ошибке"} — если полезно, подарите время Pro к запуску:</span>
+      <div className="row g8">{[7, 14, 30].map((d) => <Button key={d} size="sm" busy={busy === d} onClick={() => give(d)}>+{d} дн.</Button>)}</div>
+    </section>
+  );
+}
+
+type Funnel = { visits_30d: number; visits_today: number; registered: number; onboarded: number; plan_created: number; waitlist: number; demo_users: number; demo_invested: number; feedback: number; telegram_links: number; sources: { source: string; campaign: string; visits: number; registered: number; waitlist: number }[] };
+
+// Воронка запуска: сколько людей дошло от посещения до листа ожидания — по ней оцениваем рекламу.
+function LaunchFunnel() {
+  const { data } = useLoad(() => api.get<{ funnel: Funnel; mode: string }>("/admin/launch"), []);
+  if (!data) return null;
+  const f = data.funnel;
+  const pct = (a: number, b: number) => (b ? `${Math.round((a / b) * 100)}%` : "—");
+  const steps: [string, number, string][] = [
+    ["Посетители за 30 дней", f.visits_30d, `сегодня ${f.visits_today}`],
+    ["Зарегистрировались", f.registered, pct(f.registered, f.visits_30d) + " от посетителей"],
+    ["Прошли анкету", f.onboarded, pct(f.onboarded, f.registered)],
+    ["Настроили копилку", f.plan_created, pct(f.plan_created, f.registered)],
+    ["В листе ожидания", f.waitlist, pct(f.waitlist, f.registered)],
+    ["Открыли демо-счёт", f.demo_users, `пополняли: ${f.demo_invested}`],
+    ["Подключили Telegram", f.telegram_links, pct(f.telegram_links, f.registered)],
+    ["Идеи и ошибки", f.feedback, "обращений"],
+  ];
+  return (
+    <section className="sheet">
+      <div className="sheet-head"><h2>Запуск: воронка</h2><span className="small muted">{data.mode === "waitlist" ? "режим листа ожидания" : "сервис открыт"}</span></div>
+      <div className="funnel-grid">
+        {steps.map(([l, v, sub]) => <div key={l} className="funnel-step"><span className="l">{l}</span><b className="num">{v}</b><span className="tiny muted">{sub}</span></div>)}
+      </div>
+      {f.sources.length > 0 && (
+        <div className="table-wrap"><table className="table">
+          <thead><tr><th>Источник (utm_source)</th><th>Кампания</th><th className="r">Посетители</th><th className="r">Регистрации</th><th className="r">В листе</th><th className="r">Конверсия</th></tr></thead>
+          <tbody>{f.sources.map((x, i) => <tr key={i}><td>{x.source || "прямые заходы"}</td><td className="muted">{x.campaign || "—"}</td><td className="r num">{x.visits}</td><td className="r num">{x.registered}</td><td className="r num">{x.waitlist}</td><td className="r num">{pct(x.registered, x.visits)}</td></tr>)}</tbody>
+        </table></div>
+      )}
+      <div className="sheet-foot small muted">Ориентир по опыту: 3–10% посетителей регистрируются. Для рекламы добавляйте к ссылке ?utm_source=instagram&utm_campaign=nov — здесь появится разбивка.</div>
+    </section>
   );
 }
 

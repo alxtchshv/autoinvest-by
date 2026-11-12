@@ -340,4 +340,20 @@ CREATE TABLE telegram_log (
 CREATE INDEX telegram_log_user ON telegram_log(user_id, id);
 CREATE INDEX telegram_log_chat ON telegram_log(chat_id, id);
 `,
+	// запуск через лист ожидания: демо-счёт (теневой пользователь с ролью demo), очередь, источник рекламы, посещения
+	`
+ALTER TABLE users ADD COLUMN demo_of INTEGER REFERENCES users(id) ON DELETE CASCADE;
+ALTER TABLE users ADD COLUMN waitlist_at INTEGER;
+ALTER TABLE users ADD COLUMN utm_source TEXT NOT NULL DEFAULT '';
+ALTER TABLE users ADD COLUMN utm_campaign TEXT NOT NULL DEFAULT '';
+ALTER TABLE users ADD COLUMN bonus_pro_days INTEGER NOT NULL DEFAULT 0; -- подарок за идеи и ошибки, начисляется при запуске
+CREATE UNIQUE INDEX users_demo_of ON users(demo_of) WHERE demo_of IS NOT NULL;
+CREATE TABLE visits (
+	day      TEXT NOT NULL,
+	source   TEXT NOT NULL DEFAULT '',
+	campaign TEXT NOT NULL DEFAULT '',
+	count    INTEGER NOT NULL DEFAULT 0,
+	PRIMARY KEY (day, source, campaign)
+);
+`,
 }

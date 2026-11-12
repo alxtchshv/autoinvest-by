@@ -1,3 +1,4 @@
+import { WaitlistHomeCard } from "../../components/Waitlist";
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { ArrowDownToLine, CalendarClock, CreditCard, PiggyBank, Plus } from "lucide-react";
@@ -52,14 +53,14 @@ export default function Home() {
       <div className="page-head" style={{ marginBottom: 4 }}>
         <div>
           <h1>{greeting()}, {firstName}</h1>
-          <p>{d.plans.length ? `${d.plans.filter((p) => p.status === "active").length} из ${d.plans.length} копилок работают` : "Начните с первой копилки — это займёт пару минут"}</p>
+          <p>{d.plans.length ? (d.plans.some((p) => p.waiting) ? `Копилок настроено: ${d.plans.length} — ждут запуска` : `${d.plans.filter((p) => p.status === "active").length} из ${d.plans.length} копилок работают`) : "Начните с первой копилки — это займёт пару минут"}</p>
         </div>
       </div>
 
       {!me?.user?.onboarded_at && (
         <Notice kind="info" title="Подберём копилку за 4 вопроса">Ответьте, сколько готовы откладывать и как относитесь к риску, — предложим состав и создадим копилку в один клик. <Link to="/app/onboarding">Подобрать план</Link></Notice>
       )}
-      {!me?.cards && <Notice kind="warn" title="Привяжите карту">Без карты копилки не смогут пополняться. <Link to="/app/cards">Привязать карту</Link></Notice>}
+      {config?.launch === "waitlist" && !me?.demo ? <WaitlistHomeCard /> : !me?.cards && <Notice kind="warn" title="Привяжите карту">Без карты копилки не смогут пополняться. <Link to="/app/cards">Привязать карту</Link></Notice>}
       {config?.require_kyc && me?.user?.kyc_status !== "approved" && (
         <Notice kind="info" title="Подтвердите личность">Для покупок нужна верификация по паспорту. <Link to="/app/profile/verification">Пройти верификацию</Link></Notice>
       )}
@@ -122,7 +123,7 @@ export default function Home() {
                     <PlanIcon icon={p.icon} />
                     <div className="grow">
                       <div className="title">{p.name}</div>
-                      <div className="sub">{p.status === "paused" ? "На паузе" : p.goal_kop ? `${(p.goal_progress_bp / 100).toFixed(0)}% от цели ${byn(p.goal_kop).replace(",00", "")}` : `${byn(p.amount_kop)} · ${p.frequency === "manual" ? "вручную" : "по расписанию"}`}</div>
+                      <div className="sub">{p.waiting ? "Ждёт запуска" : p.status === "paused" ? "На паузе" : p.goal_kop ? `${(p.goal_progress_bp / 100).toFixed(0)}% от цели ${byn(p.goal_kop).replace(",00", "")}` : `${byn(p.amount_kop)} · ${p.frequency === "manual" ? "вручную" : "по расписанию"}`}</div>
                     </div>
                     <div className="end">
                       <Money k={p.valuation.value_kop} />

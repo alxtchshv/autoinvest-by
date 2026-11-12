@@ -11,6 +11,7 @@ import { Button, Field, Input, LoadError, Modal, Notice, PageLoader, Switch, use
 import { DatePicker, isoDate } from "../../components/DatePicker";
 import { VerificationPanel } from "./Verify";
 import { useConfirm } from "../../components/Confirm";
+import { useDemoSwitch } from "../../components/Waitlist";
 import { addPasskey, deviceName, passkeyError, passkeysSupported } from "../../lib/webauthn";
 import { AppleMark, GoogleMark } from "../../components/SocialLogin";
 import { LogoutButton } from "../../components/layout";
@@ -22,14 +23,18 @@ const TABS = [
 
 export default function Profile() {
   const { tab = "personal" } = useParams();
+  const { me, config } = useSession();
   const title = TABS.find((t) => t[0] === tab)?.[1] || "Профиль";
   useTitle(title);
+  // до запуска проверка личности не нужна — вкладку не показываем; на демо-счёте настройки живут в основном аккаунте
+  const tabs = TABS.filter(([k]) => !(k === "verification" && config?.launch === "waitlist"));
+  if (me?.demo) return <DemoProfile />;
   return (
     <div>
       <div className="page-head"><h1>Профиль</h1><LogoutButton /></div>
       <div className="profile-layout">
         <nav className="profile-nav" aria-label="Разделы профиля">
-          {TABS.map(([k, l]) => <NavLink key={k} to={`/app/profile/${k}`}>{l}{k === "verification" && <KycBadge />}</NavLink>)}
+          {tabs.map(([k, l]) => <NavLink key={k} to={`/app/profile/${k}`}>{l}{k === "verification" && <KycBadge />}</NavLink>)}
         </nav>
         <div key={tab} className="stack g16 tab-anim">
           {tab === "personal" && <Personal />}
@@ -42,6 +47,20 @@ export default function Profile() {
           {tab === "risk" && <RiskQuiz />}
         </div>
       </div>
+    </div>
+  );
+}
+
+function DemoProfile() {
+  const demo = useDemoSwitch();
+  return (
+    <div>
+      <div className="page-head"><h1>Профиль</h1></div>
+      <section className="sheet sheet-pad stack g12" style={{ maxWidth: 640 }}>
+        <h2 style={{ margin: 0 }}>Это демо-счёт</h2>
+        <p className="muted" style={{ margin: 0 }}>Пароль, вход, Telegram и личные данные настраиваются в вашем основном аккаунте. Здесь — только виртуальные копилки.</p>
+        <div><Button variant="primary" busy={demo.busy} onClick={demo.exit}>Вернуться в мой аккаунт</Button></div>
+      </section>
     </div>
   );
 }

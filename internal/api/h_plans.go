@@ -19,6 +19,7 @@ import (
 
 type planView struct {
 	*store.Plan
+	Waiting        bool             `json:"waiting"` // до запуска: копилка настроена и ждёт открытия пополнений
 	Valuation      engine.Valuation `json:"valuation"`
 	Card           *store.Card      `json:"card"`
 	Risk           int              `json:"risk"`
@@ -53,6 +54,9 @@ const goalMaxRuns = 11000
 
 func (s *Server) viewPlan(r *http.Request, p *store.Plan, cards map[int64]*store.Card) planView {
 	v := planView{Plan: p, Valuation: s.En.Value(p.Positions), Risk: planRiskOf(p), NextRuns: []int64{}}
+	if u := currentUser(r); u != nil && s.waitlistMode() && !u.IsDemo() && p.Status == "paused" && p.CardID == nil {
+		v.Waiting = true
+	}
 	if p.CardID != nil {
 		v.Card = cards[*p.CardID]
 	}
@@ -347,7 +351,11 @@ func (s *Server) createPlan(w http.ResponseWriter, r *http.Request) {
 		s.planFieldErr(w, f, msg)
 		return
 	}
-	if p.CardID == nil {
+	waiting := s.waitlistMode() && !u.IsDemo() // до запуска: копилка сохраняется и ждёт открытия пополнений
+	if waiting {
+		p.CardID, in.FirstTopup = nil, false
+	}
+	if p.CardID == nil && !waiting {
 		if c, err := s.St.DefaultCard(r.Context(), u.ID); err == nil {
 			p.CardID = &c.ID
 		}
@@ -372,7 +380,12 @@ func (s *Server) createPlan(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	p, _ = s.St.Plan(r.Context(), u.ID, p.ID)
-	writeJSON(w, http.StatusCreated, map[string]any{"plan": s.viewPlan(r, p, s.cardMap(r, u.ID)), "topup_error": topupErr})
+	resp := map[string]any{"plan": s.viewPlan(r, p, s.cardMap(r, u.ID)), "topup_error": topupErr}
+	if waiting {
+		pos, _ := s.St.JoinWaitlist(r.Context(), u.ID)
+		resp["waitlist"] = map[string]any{"position": pos}
+	}
+	writeJSON(w, http.StatusCreated, resp)
 }
 
 func (s *Server) loadPlan(w http.ResponseWriter, r *http.Request) *store.Plan {

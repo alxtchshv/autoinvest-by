@@ -3,6 +3,7 @@ package notify
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"log/slog"
 	"mime"
@@ -214,11 +215,52 @@ func (m *Mailer) Send(to, subject, body string) error {
 	if m.User != "" {
 		a = smtp.PlainAuth("", m.User, m.Pass, m.Host)
 	}
-	err := smtp.SendMail(net.JoinHostPort(m.Host, fmt.Sprint(m.Port)), a, fromAddr, []string{to}, []byte(msg))
+	var err error
+	if m.Port == 465 {
+		err = sendImplicitTLS(m.Host, m.Port, a, fromAddr, to, []byte(msg)) // Яндекс, Mail.ru: TLS сразу
+	} else {
+		err = smtp.SendMail(net.JoinHostPort(m.Host, fmt.Sprint(m.Port)), a, fromAddr, []string{to}, []byte(msg)) // 587: STARTTLS (Gmail)
+	}
 	if err != nil {
 		m.log.Error("smtp", "to", to, "err", err)
 	}
 	return err
+}
+
+// sendImplicitTLS — SMTP поверх TLS с первого байта (порт 465).
+func sendImplicitTLS(host string, port int, a smtp.Auth, from, to string, msg []byte) error {
+	conn, err := tls.DialWithDialer(&net.Dialer{Timeout: 15 * time.Second}, "tcp", net.JoinHostPort(host, fmt.Sprint(port)), &tls.Config{ServerName: host})
+	if err != nil {
+		return err
+	}
+	c, err := smtp.NewClient(conn, host)
+	if err != nil {
+		conn.Close()
+		return err
+	}
+	defer c.Close()
+	if a != nil {
+		if err := c.Auth(a); err != nil {
+			return err
+		}
+	}
+	if err := c.Mail(from); err != nil {
+		return err
+	}
+	if err := c.Rcpt(to); err != nil {
+		return err
+	}
+	wc, err := c.Data()
+	if err != nil {
+		return err
+	}
+	if _, err := wc.Write(msg); err != nil {
+		return err
+	}
+	if err := wc.Close(); err != nil {
+		return err
+	}
+	return c.Quit()
 }
 
 func encodeFrom(from string) string {

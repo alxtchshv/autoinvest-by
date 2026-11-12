@@ -89,6 +89,11 @@ func (s *Server) routes(m *http.ServeMux) {
 	pub("GET /healthz", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("ok")) })
 	pub("GET /readyz", s.readyz)
 	pub("GET /api/v1/config", s.getConfig)
+	pub("POST /api/v1/track", s.track)
+	user("GET /api/v1/waitlist", s.waitlistInfo)
+	user("POST /api/v1/waitlist/join", s.waitlistJoin)
+	user("POST /api/v1/demo/enter", s.demoEnter)
+	user("POST /api/v1/demo/exit", s.demoExit)
 
 	// авторизация
 	pub("POST /api/v1/auth/register/start", s.registerStart)
@@ -158,12 +163,12 @@ func (s *Server) routes(m *http.ServeMux) {
 	user("POST /api/v1/telegram/sandbox/contact", s.tgSandboxContact)
 	user("GET /api/v1/referral", s.referral)
 	user("GET /api/v1/billing", s.billing)
-	user("POST /api/v1/billing/pro", s.buyPro)
-	user("POST /api/v1/billing/autorenew", s.setAutorenew)
+	user("POST /api/v1/billing/pro", s.paid(s.buyPro))
+	user("POST /api/v1/billing/autorenew", s.paid(s.setAutorenew))
 
 	// карты и платежи
 	user("GET /api/v1/cards", s.listCards)
-	user("POST /api/v1/cards/bind", s.startBinding)
+	user("POST /api/v1/cards/bind", s.paid(s.startBinding))
 	user("GET /api/v1/cards/bindings/{ref}", s.bindingStatus)
 	user("POST /api/v1/cards/{id}/default", s.defaultCard)
 	user("DELETE /api/v1/cards/{id}", s.deleteCard)
@@ -180,8 +185,8 @@ func (s *Server) routes(m *http.ServeMux) {
 	user("GET /api/v1/plans/{id}", s.getPlan)
 	user("PATCH /api/v1/plans/{id}", s.updatePlan)
 	user("POST /api/v1/plans/{id}/pause", s.pausePlan)
-	user("POST /api/v1/plans/{id}/resume", s.resumePlan)
-	user("POST /api/v1/plans/{id}/topup", s.topupPlan)
+	user("POST /api/v1/plans/{id}/resume", s.paid(s.resumePlan))
+	user("POST /api/v1/plans/{id}/topup", s.paid(s.topupPlan))
 	user("POST /api/v1/plans/{id}/withdraw", s.withdrawPlan)
 	user("POST /api/v1/plans/{id}/close", s.closePlan)
 	user("GET /api/v1/plans/{id}/history", s.planHistory)
@@ -224,6 +229,8 @@ func (s *Server) routes(m *http.ServeMux) {
 	staff("POST /api/v1/admin/tickets/{id}/reply", s.adminTicketReply)
 	staff("GET /api/v1/admin/users/{id}/export/{kind}", s.adminUserExport)
 	staff("GET /api/v1/admin/orders/export.csv", s.adminOrdersExport)
+	staff("GET /api/v1/admin/launch", s.adminLaunch)
+	admin("POST /api/v1/admin/users/{id}/bonus", s.adminBonus)
 	staff("POST /api/v1/admin/tickets/{id}/status", s.adminTicketStatus)
 	staff("GET /api/v1/admin/orders", s.adminOrders)
 	admin("POST /api/v1/admin/orders/{id}/payout-done", s.adminPayoutDone)
@@ -375,6 +382,9 @@ func (s *Server) requireUser(h http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if currentUser(r) == nil {
 			writeErr(w, http.StatusUnauthorized, "Войдите в аккаунт")
+			return
+		}
+		if s.demoGuard(w, r) {
 			return
 		}
 		h(w, r)

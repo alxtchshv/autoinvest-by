@@ -10,6 +10,7 @@ import { AssetIcon, Button, Change, Field, Input, LoadError, Modal, MoreMenu, Mo
 import { DatePicker } from "../../components/DatePicker";
 import { ValueChart } from "../../components/charts";
 import { useConfirm } from "../../components/Confirm";
+import { WaitlistHomeCard } from "../../components/Waitlist";
 import { SchedulePicker, StrategyPicker, type Schedule } from "./PlanNew";
 import { AllocBar } from "./Plans";
 
@@ -77,7 +78,7 @@ export default function PlanDetail() {
         <div className="pd-head">
           <PlanIcon icon={p.icon} />
           <div className="pd-title">
-            <div className="row g12 wrap"><h1>{p.name}</h1><PlanStatus s={p.status} /></div>
+            <div className="row g12 wrap"><h1>{p.name}</h1><PlanStatus s={p.status} waiting={p.waiting} /></div>
             <p>{p.frequency === "manual" ? "Пополнение вручную" : `${byn(p.amount_kop)} ${scheduleText(p)}`}{p.card ? ` · карта •• ${p.card.last4}` : ""}</p>
           </div>
           {!closed && (
@@ -99,7 +100,7 @@ export default function PlanDetail() {
         </div>
       </div>
 
-      {p.status === "paused" && !p.card && <Notice kind="warn">У копилки нет карты. <Link to="/app/cards">Привяжите карту</Link>, затем включите копилку.</Notice>}
+      {p.waiting ? <WaitlistHomeCard /> : p.status === "paused" && !p.card && <Notice kind="warn">У копилки нет карты. <Link to="/app/cards">Привяжите карту</Link>, затем включите копилку.</Notice>}
       {p.fail_count > 0 && p.status === "active" && <Notice kind="warn">Последнее списание не прошло ({p.fail_count} подряд). После трёх отказов копилка встанет на паузу — проверьте баланс карты.</Notice>}
 
       <section className={`sheet pd-hero ${p.goal_kop ? "with-goal" : ""}`}>
@@ -144,7 +145,7 @@ export default function PlanDetail() {
           <div className="sheet-body">
             {p.status === "active" && p.next_runs.length ? (
               p.next_runs.map((t, i) => <div key={t} className={`pd-run ${i ? "muted" : ""}`}><span>{when(t)}</span><Money k={p.amount_kop} /></div>)
-            ) : <div className="muted">{closed ? "Копилка закрыта" : p.frequency === "manual" ? "Пополнения только вручную" : "Копилка на паузе"}</div>}
+            ) : <div className="muted">{closed ? "Копилка закрыта" : p.waiting ? "Начнутся сразу после запуска — пришлём уведомление" : p.frequency === "manual" ? "Пополнения только вручную" : "Копилка на паузе"}</div>}
             {p.frequency !== "manual" && !closed && <div className="pd-run pd-month"><span className="muted">В месяц около</span><Money k={p.monthly_kop} /></div>}
             <div className="pd-plan">
               <div className="grow pd-plan-name">{st ? planName(st.name) : "Свой состав"}</div>

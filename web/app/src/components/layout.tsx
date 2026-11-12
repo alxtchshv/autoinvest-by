@@ -1,8 +1,10 @@
 import { Suspense, useEffect, useRef, useState, type ReactNode } from "react";
 import { BiometricOffer } from "./BiometricOffer";
+import { DemoBar, WaitlistModal } from "./Waitlist";
 import { Link, NavLink, Navigate, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { Menu, X, PanelLeftClose, PanelLeftOpen, Bell, ChartCandlestick, CreditCard, Eye, EyeOff, History, House, LifeBuoy, PiggyBank, Calculator, Shield, LogOut, User } from "lucide-react";
 import { api } from "../lib/api";
+import { trackVisit } from "../lib/utm";
 import { ago, initials } from "../lib/format";
 import { useLoad } from "../lib/hooks";
 import { MarketProvider, useSession, useUserEvent } from "../lib/session";
@@ -12,6 +14,8 @@ import { Button, Logo, PageLoader, useHide, useToast } from "./ui";
 export function ModeBanner() {
   const { config } = useSession();
   if (!config) return null;
+  // до запуска сайт выглядит как настоящий: плашки «тестовый режим» нет, демо-счёт помечен отдельно (DemoBar)
+  if (config.launch === "waitlist" && !config.market_demo) return null;
   if (config.mode === "live" && !config.market_demo) return null;
   return (
     <div className="mode-banner">
@@ -67,7 +71,7 @@ export function AppShell() {
             {NAV.map((n) => item(n.to, n.label, n.icon, n.end))}
             <div className="nav-sep" />
             {item("/app/support", "Поддержка", LifeBuoy)}
-            {me?.user && me.user.role !== "user" && item("/admin", "Админка", Shield)}
+            {me?.user && (me.user.role === "admin" || me.user.role === "support") && item("/admin", "Админка", Shield)}
           </nav>
           <div className="side-foot">
             <NavLink to="/app/profile" className="side-user" title={collapsed ? (me?.user?.name || "Профиль") : undefined}>
@@ -81,9 +85,11 @@ export function AppShell() {
         </aside>
         <div className="main">
           <ModeBanner />
+          <DemoBar />
           <TopBar />
           <main className="content" id="main">
             <BiometricOffer />
+            <WaitlistModal />
             <Suspense fallback={<PageLoader />}><Outlet /></Suspense>
           </main>
         </div>
@@ -186,6 +192,7 @@ const SITE_LINKS: [string, string][] = [["how", "Как это работает"
 export function PublicLayout() {
   const { me } = useSession();
   const loc = useLocation();
+  useEffect(() => { trackVisit(); }, []);
   const [scrolled, setScrolled] = useState(false);
   const [menu, setMenu] = useState(false);
   useEffect(() => {
@@ -211,7 +218,7 @@ export function PublicLayout() {
           ) : (
             <div className="row g8">
               <Link to="/login" className="btn btn-ghost btn-sm">Войти</Link>
-              <Link to="/register" className="btn btn-primary btn-sm hide-sm">Открыть копилку</Link>
+              <Link to="/register" className="btn btn-primary btn-sm hide-sm">Начать копить</Link>
             </div>
           )}
           <button className="burger" aria-label={menu ? "Закрыть меню" : "Открыть меню"} aria-expanded={menu} onClick={() => setMenu(!menu)}>{menu ? <X /> : <Menu />}</button>
@@ -219,7 +226,7 @@ export function PublicLayout() {
         <div className={`mnav ${menu ? "open" : ""}`} inert={!menu}>
           <div>
             {links(() => setMenu(false))}
-            {!me?.user && <Link to="/register" onClick={() => setMenu(false)}>Открыть копилку</Link>}
+            {!me?.user && <Link to="/register" onClick={() => setMenu(false)}>Начать копить</Link>}
           </div>
         </div>
       </header>

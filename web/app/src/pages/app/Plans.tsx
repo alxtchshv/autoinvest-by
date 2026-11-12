@@ -27,7 +27,7 @@ function PlanCard({ p }: { p: Plan }) {
           <div className="pc-name">{p.name}</div>
           <div className="small muted">{p.frequency === "manual" ? "Пополнение вручную" : `${byn(p.amount_kop)} ${scheduleText(p)}`}</div>
         </div>
-        <PlanStatus s={p.status} />
+        <PlanStatus s={p.status} waiting={p.waiting} />
       </div>
       <div className="row between" style={{ alignItems: "flex-end" }}>
         <Money k={v.value_kop} size="lg" />

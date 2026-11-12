@@ -65,6 +65,7 @@ type Config struct {
 	AdminPassword string
 
 	RequireKYC   bool
+	LaunchMode   string // open | waitlist — до запуска: копилку настроить можно, оплатить нельзя (лист ожидания + демо-счёт)
 	KYCDocs      string // sandbox | sumsub | manual — проверка по паспорту и селфи
 	MSIMode      string // sandbox | oauth | off — вход через межбанковскую систему идентификации
 	SumsubBase   string
@@ -183,6 +184,7 @@ func Load() (*Config, error) {
 	// Apple ID пока выключен (нужен платный аккаунт разработчика); включится сам, когда появятся ключи
 	c.OAuthApple = env("OAUTH_APPLE", map[bool]string{true: "on", false: "off"}[c.AppleClientID != ""])
 	c.TelegramSandbox = envBool("TELEGRAM_SANDBOX", c.TelegramToken == "" && c.Env != "production")
+	c.LaunchMode = env("LAUNCH_MODE", "open")
 	c.SecureCookies = strings.HasPrefix(c.PublicURL, "https://")
 	return c, c.validate()
 }
@@ -247,6 +249,16 @@ func (c *Config) validate() error {
 	}
 	if c.Env == "production" && (c.KYCDocs == "sandbox" || c.MSIMode == "sandbox") {
 		return errors.New("тестовая проверка личности (KYC_DOCS/MSI_MODE=sandbox) недоступна при APP_ENV=production")
+	}
+	switch c.LaunchMode {
+	case "open":
+	case "waitlist":
+		// до запуска деньги не принимаются: демо-счёт работает на встроенной тестовой платёжке
+		if c.Payments != PaymentsSandbox {
+			return errors.New("LAUNCH_MODE=waitlist работает только с PAYMENTS=sandbox (демо-счёт на виртуальных деньгах)")
+		}
+	default:
+		return fmt.Errorf("неизвестный LAUNCH_MODE=%q (open|waitlist)", c.LaunchMode)
 	}
 	if c.Market != MarketLive && c.Market != MarketFixture {
 		return fmt.Errorf("неизвестный MARKET=%q (live|fixture)", c.Market)

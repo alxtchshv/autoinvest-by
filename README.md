@@ -12,6 +12,9 @@
 * `create_demo.bat` — демо-аккаунт `demo@autoinvest.by` / `demo12345`;
 * `create_admin.bat` — администратор (спросит почту и пароль).
 
+**Настоящая версия до запуска** (лист ожидания + демо-счёт, ключи из `.env`): `make start` или `start.bat` → http://localhost:8090.
+Тестовый стенд с фейковыми картами: `make test-stand` или `test_stand.bat` → http://localhost:8092. План запуска — [`10_ПЛАН_ЗАПУСКА_2_НЕДЕЛИ.md`](10_ПЛАН_ЗАПУСКА_2_НЕДЕЛИ.md).
+
 **macOS / Linux**
 ```bash
 make run                                  # сервер на http://localhost:8080 (или ./scripts/run.sh)

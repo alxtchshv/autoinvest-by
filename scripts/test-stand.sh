@@ -7,9 +7,11 @@
 set -eu
 cd "$(dirname "$0")/.."
 
-export DATA_DIR=data-test PAYMENTS=sandbox BROKER=paper MARKET=live APP_ENV=development
-export ADDR="${ADDR:-:8090}" PUBLIC_URL="${PUBLIC_URL:-http://localhost:8090}"
+export DATA_DIR=data-test PAYMENTS=sandbox BROKER=paper MARKET=live APP_ENV=development LAUNCH_MODE=open
+export ADDR="${ADDR:-:8092}" PUBLIC_URL="${PUBLIC_URL:-http://localhost:8092}"
 export BEPAID_SHOP_ID= BEPAID_SECRET_KEY= BEPAID_TEST=true
+# стенд не трогает настоящие ключи из .env: тестовый Telegram и тестовая страница входа через Google
+export TELEGRAM_BOT_TOKEN= TELEGRAM_SUPPORT_CHAT_ID= GOOGLE_CLIENT_ID= GOOGLE_CLIENT_SECRET= OAUTH_GOOGLE=sandbox SMTP_HOST=
 
 PORT="${ADDR##*:}"
 # pid процесса, который слушает порт стенда (пусто, если порт свободен)
@@ -57,7 +59,7 @@ fi
 
 cat <<'TXT'
 ================================================================
- Тестовый стенд: http://localhost:8090
+ Тестовый стенд: http://localhost:8092
  Пользователь:   demo@autoinvest.by / demo12345
  Админка:        admin@autoinvest.test / admin12345  (/admin)
  Тестовые карты: 4200 0000 0000 0000 — всё проходит

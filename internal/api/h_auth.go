@@ -52,6 +52,7 @@ func (s *Server) getConfig(w http.ResponseWriter, r *http.Request) {
 		"market_demo":     s.Hub.IsFixture(),
 		"telegram_bot":    s.botUsername(),
 		"telegram_test":   s.TG != nil,
+		"launch":          c.LaunchMode,
 		"fee_free_bp":     c.FeeFreeBP,
 		"fee_pro_bp":      c.FeeProBP,
 		"spread_bp":       c.SpreadBP,
@@ -94,9 +95,11 @@ func (s *Server) clearSession(w http.ResponseWriter) {
 // Регистрация в два шага: register/start проверяет данные и отправляет 6-значный код на почту,
 // register/confirm принимает код и только тогда создаёт аккаунт (почта сразу подтверждена).
 type signupDraft struct {
-	Name string `json:"name"`
-	Hash string `json:"hash"`
-	Ref  string `json:"ref"`
+	Name        string `json:"name"`
+	Hash        string `json:"hash"`
+	Ref         string `json:"ref"`
+	UTMSource   string `json:"utm_source"`
+	UTMCampaign string `json:"utm_campaign"`
 }
 
 const signupCodeTTL = 15 * 60
@@ -107,6 +110,8 @@ func (s *Server) registerStart(w http.ResponseWriter, r *http.Request) {
 		Email    string `json:"email"`
 		Password string `json:"password"`
 		Ref      string `json:"ref"`
+		UTMSrc   string `json:"utm_source"` // откуда пришёл человек (реклама) — для оценки каналов
+		UTMCamp  string `json:"utm_campaign"`
 		Offer    bool   `json:"accept_offer"`   // публичная оферта и уведомление о рисках
 		Privacy  bool   `json:"accept_privacy"` // согласие на обработку персональных данных (Закон № 99-З)
 	}
@@ -154,7 +159,7 @@ func (s *Server) registerStart(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, r, err)
 		return
 	}
-	raw, _ := json.Marshal(signupDraft{Name: in.Name, Hash: hash, Ref: in.Ref})
+	raw, _ := json.Marshal(signupDraft{Name: in.Name, Hash: hash, Ref: in.Ref, UTMSource: cleanTag(in.UTMSrc), UTMCampaign: cleanTag(in.UTMCamp)})
 	s.St.SetKV(r.Context(), "signup:"+in.Email, string(raw))
 	code := randomDigits(6)
 	if err := s.St.CreatePhoneCode(r.Context(), in.Email, "signup", 0, code, signupCodeTTL); err != nil {
@@ -211,6 +216,9 @@ func (s *Server) registerConfirm(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.St.Audit(r.Context(), u.ID, u.ID, "auth.register", "", clientIP(r))
+	if d.UTMSource != "" || d.UTMCampaign != "" {
+		s.St.UpdateUserFields(r.Context(), u.ID, map[string]any{"utm_source": d.UTMSource, "utm_campaign": d.UTMCampaign})
+	}
 	for _, kind := range []string{store.ConsentOffer, store.ConsentRisks, store.ConsentPrivacy} {
 		if err := s.St.RecordConsent(r.Context(), u.ID, kind, LegalVersion); err != nil {
 			s.Log.Error("consent", "user", u.ID, "err", err)
@@ -361,6 +369,11 @@ func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
 		s.St.DeleteSession(r.Context(), sess.ID)
 		s.St.Audit(r.Context(), sess.UserID, sess.UserID, "auth.logout", shortUA(r.UserAgent()), clientIP(r))
 	}
+	// выход с демо-счёта завершает и основной сеанс
+	if c, err := r.Cookie(mainCookie); err == nil && c.Value != "" {
+		s.St.DeleteSession(r.Context(), auth.HashToken(c.Value))
+		http.SetCookie(w, &http.Cookie{Name: mainCookie, Value: "", Path: "/", MaxAge: -1, HttpOnly: true})
+	}
 	s.clearSession(w)
 	writeJSON(w, 200, map[string]bool{"ok": true})
 }
@@ -389,6 +402,7 @@ func (s *Server) mePayload(r *http.Request, u *store.User) map[string]any {
 	return map[string]any{
 		"user": u, "is_pro": u.IsPro(), "unread": unread, "cards": len(cards), "plans": plans,
 		"telegram_linked": u.TelegramChatID != nil,
+		"demo":            u.IsDemo(),
 		"passkeys":        s.St.CountPasskeys(r.Context(), u.ID),
 	}
 }

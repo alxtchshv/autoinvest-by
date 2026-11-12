@@ -1,6 +1,7 @@
 # данные и сборка
 /data/
 /data-test/
+/data-real/
 /backups/
 /bin/
 *.db

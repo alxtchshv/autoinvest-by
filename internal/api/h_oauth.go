@@ -30,6 +30,8 @@ type oauthState struct {
 	UserID   int64  `json:"uid"`
 	Next     string `json:"next"`
 	Exp      int64  `json:"exp"`
+	UTMSrc   string `json:"utm_source,omitempty"`
+	UTMCamp  string `json:"utm_campaign,omitempty"`
 }
 
 func (s *Server) oauthMode(provider string) string {
@@ -67,7 +69,8 @@ func (s *Server) oauthStart(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/login?oauth_error=off", http.StatusFound)
 		return
 	}
-	st := oauthState{Provider: provider, Mode: "login", Next: safeNext(r.URL.Query().Get("next")), Exp: time.Now().Add(10 * time.Minute).Unix()}
+	st := oauthState{Provider: provider, Mode: "login", Next: safeNext(r.URL.Query().Get("next")), Exp: time.Now().Add(10 * time.Minute).Unix(),
+		UTMSrc: cleanTag(r.URL.Query().Get("utm_source")), UTMCamp: cleanTag(r.URL.Query().Get("utm_campaign"))}
 	if r.URL.Query().Get("mode") == "link" {
 		u := currentUser(r)
 		if u == nil {
@@ -194,6 +197,9 @@ func (s *Server) oauthFinish(w http.ResponseWriter, r *http.Request, provider, s
 	u, err := s.St.UserByIdentity(ctx, provider, p.Subject)
 	if errors.Is(err, store.ErrNotFound) {
 		u, err = s.oauthUser(r, provider, p)
+		if err == nil && (st.UTMSrc != "" || st.UTMCamp != "") && u.UTMSource == "" {
+			s.St.UpdateUserFields(r.Context(), u.ID, map[string]any{"utm_source": st.UTMSrc, "utm_campaign": st.UTMCamp})
+		}
 		if err != nil {
 			s.Log.Warn("oauth user", "provider", provider, "err", err)
 			fail("email")

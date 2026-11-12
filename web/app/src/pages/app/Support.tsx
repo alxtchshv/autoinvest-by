@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
-import { ArrowLeft, MessageSquare, Plus, Send } from "lucide-react";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { ArrowLeft, Bug, Lightbulb, MessageSquare, Plus, Send } from "lucide-react";
 import { api } from "../../lib/api";
 import { ago, dateTime } from "../../lib/format";
 import { useLoad, useSubmit, useTitle } from "../../lib/hooks";
@@ -23,7 +23,18 @@ export function Support() {
   const [open, setOpen] = useState(false);
   const [f, setF] = useState({ subject: "", category: "plans", body: "" });
   const s = useSubmit();
+  const [sp, setSp] = useSearchParams();
   useUserEvent("notification", reload);
+  const startFeedback = (category: "idea" | "bug") => {
+    setF({ subject: category === "idea" ? "Идея: " : "Ошибка: ", category, body: "" });
+    setOpen(true);
+  };
+  // ссылка «Предложить идею» из листа ожидания и плашки демо-счёта: /app/support?new=idea
+  useEffect(() => {
+    const n = sp.get("new");
+    if (n === "idea" || n === "bug") { startFeedback(n); setSp({}, { replace: true }); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const statusBadge = (st: string) => st === "answered" ? <span className="badge badge-brand">Есть ответ</span> : st === "open" ? <span className="badge badge-warn">Ждёт ответа</span> : <span className="badge">Закрыто</span>;
   return (
     <div className="stack g16">
@@ -31,6 +42,16 @@ export function Support() {
         <div><h1>Поддержка</h1><p>Отвечаем в рабочие дни с 9:00 до 21:00, обычно в течение часа</p></div>
         <Button variant="primary" icon={<Plus />} onClick={() => setOpen(true)}>Новое обращение</Button>
       </div>
+      <section className="sheet feedback-card">
+        <div className="fb-text">
+          <b>Помогите сделать AutoInvest лучше</b>
+          <span>Есть идея или нашли ошибку? Напишите — за полезные предложения подарим дополнительное время Pro при запуске.</span>
+        </div>
+        <div className="row g8 wrap">
+          <Button icon={<Lightbulb />} onClick={() => startFeedback("idea")}>Предложить идею</Button>
+          <Button icon={<Bug />} onClick={() => startFeedback("bug")}>Сообщить об ошибке</Button>
+        </div>
+      </section>
       <div className="home-grid">
         <section className="sheet">
           <div className="sheet-head"><h2>Мои обращения</h2></div>

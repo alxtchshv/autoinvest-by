@@ -58,9 +58,15 @@ export default function Onboarding() {
     if (!result) return;
     const rec = result.recommendation;
     try {
-      const r = await create.submit(() => api.post<{ plan: Plan }>("/plans", {
+      const r = await create.submit(() => api.post<{ plan: Plan; waitlist?: { position: number } }>("/plans", {
         name: rec.name, icon: rec.icon, amount_kop: rec.amount_kop, frequency: rec.frequency, weekday: 5, run_minute: 600, strategy: rec.strategy,
       }));
+      if (r?.waitlist) {
+        // до запуска: копилка сохранена, человек в листе ожидания — показываем окно с демо-счётом
+        nav(`/app/plans/${r.plan.id}`, { replace: true });
+        window.dispatchEvent(new CustomEvent("ai:waitlist", { detail: { position: r.waitlist.position } }));
+        return;
+      }
       if (r) nav(me?.cards ? `/app/plans/${r.plan.id}` : "/app/cards", { replace: true });
     } catch {
       /* ошибка показана в create.error */

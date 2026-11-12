@@ -38,20 +38,20 @@ func (s *Store) Overview(ctx context.Context) (Overview, error) {
 	q(&o.Users, `SELECT COUNT(*) FROM users WHERE status!='deleted' AND role='user'`)
 	q(&o.UsersToday, `SELECT COUNT(*) FROM users WHERE created_at>? AND role='user'`, day)
 	q(&o.Users7d, `SELECT COUNT(*) FROM users WHERE created_at>? AND role='user'`, now-7*86400)
-	q(&o.ActivePlans, `SELECT COUNT(*) FROM plans WHERE status='active'`)
-	q(&o.PausedPlans, `SELECT COUNT(*) FROM plans WHERE status='paused'`)
-	q(&o.Investors, `SELECT COUNT(DISTINCT user_id) FROM orders WHERE status='filled' AND side='buy'`)
+	q(&o.ActivePlans, `SELECT COUNT(*) FROM plans WHERE user_id IN (SELECT id FROM users WHERE role='user') AND status='active'`)
+	q(&o.PausedPlans, `SELECT COUNT(*) FROM plans WHERE user_id IN (SELECT id FROM users WHERE role='user') AND status='paused'`)
+	q(&o.Investors, `SELECT COUNT(DISTINCT user_id) FROM orders WHERE user_id IN (SELECT id FROM users WHERE role='user') AND status='filled' AND side='buy'`)
 	q(&o.Pro, `SELECT COUNT(*) FROM users WHERE tier='pro' AND pro_until>?`, now)
-	q(&o.VolumeKop, `SELECT COALESCE(SUM(amount_kop),0) FROM orders WHERE status='filled' AND side='buy'`)
-	q(&o.Volume30dKop, `SELECT COALESCE(SUM(amount_kop),0) FROM orders WHERE status='filled' AND side='buy' AND created_at>?`, now-30*86400)
-	q(&o.FeesKop, `SELECT COALESCE(SUM(fee_kop),0) FROM orders WHERE status='filled'`)
-	q(&o.Orders30d, `SELECT COUNT(*) FROM orders WHERE created_at>?`, now-30*86400)
-	q(&o.FailedOrders7d, `SELECT COUNT(*) FROM orders WHERE status='failed' AND created_at>?`, now-7*86400)
+	q(&o.VolumeKop, `SELECT COALESCE(SUM(amount_kop),0) FROM orders WHERE user_id IN (SELECT id FROM users WHERE role='user') AND status='filled' AND side='buy'`)
+	q(&o.Volume30dKop, `SELECT COALESCE(SUM(amount_kop),0) FROM orders WHERE user_id IN (SELECT id FROM users WHERE role='user') AND status='filled' AND side='buy' AND created_at>?`, now-30*86400)
+	q(&o.FeesKop, `SELECT COALESCE(SUM(fee_kop),0) FROM orders WHERE user_id IN (SELECT id FROM users WHERE role='user') AND status='filled'`)
+	q(&o.Orders30d, `SELECT COUNT(*) FROM orders WHERE user_id IN (SELECT id FROM users WHERE role='user') AND created_at>?`, now-30*86400)
+	q(&o.FailedOrders7d, `SELECT COUNT(*) FROM orders WHERE user_id IN (SELECT id FROM users WHERE role='user') AND status='failed' AND created_at>?`, now-7*86400)
 	q(&o.OpenTickets, `SELECT COUNT(*) FROM tickets WHERE status='open'`)
 	q(&o.PendingKYC, `SELECT COUNT(*) FROM kyc WHERE status='pending'`)
-	q(&o.PendingPayouts, `SELECT COUNT(*) FROM orders WHERE status='payout_pending'`)
+	q(&o.PendingPayouts, `SELECT COUNT(*) FROM orders WHERE user_id IN (SELECT id FROM users WHERE role='user') AND status='payout_pending'`)
 	q(&o.MonthlyRunKop, `SELECT COALESCE(SUM(CASE frequency WHEN 'daily' THEN amount_kop*30 WHEN 'weekly' THEN amount_kop*52/12
-		WHEN 'biweekly' THEN amount_kop*26/12 WHEN 'monthly' THEN amount_kop ELSE 0 END),0) FROM plans WHERE status='active'`)
+		WHEN 'biweekly' THEN amount_kop*26/12 WHEN 'monthly' THEN amount_kop ELSE 0 END),0) FROM plans WHERE user_id IN (SELECT id FROM users WHERE role='user') AND status='active'`)
 	return o, nil
 }
 
@@ -69,7 +69,7 @@ func (s *Store) DailySeries(ctx context.Context, days int) ([]DayPoint, error) {
 		m[d] = &DayPoint{Day: d, Signups: n}
 	}
 	rows.Close()
-	rows, err = s.DB.QueryContext(ctx, `SELECT date(created_at,'unixepoch'), SUM(amount_kop) FROM orders WHERE created_at>? AND status='filled' AND side='buy' GROUP BY 1`, from)
+	rows, err = s.DB.QueryContext(ctx, `SELECT date(created_at,'unixepoch'), SUM(amount_kop) FROM orders WHERE user_id IN (SELECT id FROM users WHERE role='user') AND created_at>? AND status='filled' AND side='buy' GROUP BY 1`, from)
 	if err != nil {
 		return nil, err
 	}
@@ -104,7 +104,7 @@ type AdminUser struct {
 }
 
 func (s *Store) AdminUsers(ctx context.Context, query string, limit, offset int) ([]AdminUser, int, error) {
-	where := ` WHERE status!='deleted'`
+	where := ` WHERE status!='deleted' AND role!='demo'`
 	var args []any
 	if q := strings.TrimSpace(query); q != "" {
 		where += ` AND (email LIKE ? OR name LIKE ? OR phone LIKE ? OR CAST(id AS TEXT)=?)`
@@ -196,12 +196,12 @@ func (s *Store) PartnerMetrics(ctx context.Context) (PartnerMetrics, error) {
 	q(&m.Funnel.WithCard, `SELECT COUNT(*) `+base+` AND EXISTS(SELECT 1 FROM cards c WHERE c.user_id=u.id)`)
 	q(&m.Funnel.WithPlan, `SELECT COUNT(*) `+base+` AND EXISTS(SELECT 1 FROM plans p WHERE p.user_id=u.id)`)
 	q(&m.Funnel.Invested, `SELECT COUNT(*) `+base+` AND EXISTS(SELECT 1 FROM orders o WHERE o.user_id=u.id AND o.side='buy' AND o.status='filled')`)
-	q(&m.ActiveInvestors, `SELECT COUNT(DISTINCT user_id) FROM orders WHERE side='buy' AND status='filled' AND created_at>?`, month)
-	q(&m.AvgTicketKop, `SELECT COALESCE(AVG(amount_kop),0) FROM orders WHERE side='buy' AND status='filled' AND created_at>?`, month)
+	q(&m.ActiveInvestors, `SELECT COUNT(DISTINCT user_id) FROM orders WHERE user_id IN (SELECT id FROM users WHERE role='user') AND side='buy' AND status='filled' AND created_at>?`, month)
+	q(&m.AvgTicketKop, `SELECT COALESCE(AVG(amount_kop),0) FROM orders WHERE user_id IN (SELECT id FROM users WHERE role='user') AND side='buy' AND status='filled' AND created_at>?`, month)
 
 	var retained int
-	q(&m.RetentionBase, `SELECT COUNT(*) FROM (SELECT user_id FROM orders WHERE side='buy' AND status='filled' GROUP BY user_id HAVING MIN(created_at)<?)`, month)
-	q(&retained, `SELECT COUNT(*) FROM (SELECT user_id FROM orders WHERE side='buy' AND status='filled' GROUP BY user_id
+	q(&m.RetentionBase, `SELECT COUNT(*) FROM (SELECT user_id FROM orders WHERE user_id IN (SELECT id FROM users WHERE role='user') AND side='buy' AND status='filled' GROUP BY user_id HAVING MIN(created_at)<?)`, month)
+	q(&retained, `SELECT COUNT(*) FROM (SELECT user_id FROM orders WHERE user_id IN (SELECT id FROM users WHERE role='user') AND side='buy' AND status='filled' GROUP BY user_id
 		HAVING MIN(created_at)<? AND MAX(created_at)>?)`, month, month)
 	if m.RetentionBase > 0 {
 		m.Retention30d = float64(retained) / float64(m.RetentionBase)

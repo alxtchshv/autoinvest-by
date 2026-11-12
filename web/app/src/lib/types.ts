@@ -17,16 +17,16 @@ export type Config = {
   fee_free_bp: number; fee_pro_bp: number; spread_bp: number; pro_month_kop: number; pro_year_kop: number;
   min_contrib_kop: number; max_contrib_kop: number; free_plan_limit: number; pro_plan_limit: number; require_kyc: boolean;
   assets: Asset[]; strategies: Strategy[]; version: string; legal_version: string;
-  telegram_test?: boolean; auth?: { google: "sandbox" | "on" | "off"; apple: "sandbox" | "on" | "off"; phone: string };
+  telegram_test?: boolean; launch?: "open" | "waitlist"; auth?: { google: "sandbox" | "on" | "off"; apple: "sandbox" | "on" | "off"; phone: string };
 };
 
 export type User = {
-  id: number; email: string; email_verified: boolean; phone: string; phone_verified?: boolean; has_password?: boolean; name: string; role: "user" | "support" | "admin";
+  id: number; email: string; email_verified: boolean; demo_of?: number | null; waitlist_at?: number | null; utm_source?: string; utm_campaign?: string; bonus_pro_days?: number; phone: string; phone_verified?: boolean; has_password?: boolean; name: string; role: "user" | "support" | "admin";
   status: string; totp_enabled: boolean; tier: string; pro_until: number | null; pro_autorenew: boolean; pro_period: string;
   referral_code: string; risk_profile: string; kyc_status: "none" | "pending" | "approved" | "rejected"; telegram_username: string;
   notify_email: boolean; notify_telegram: boolean; notify_market: boolean; created_at: number; last_login_at: number | null; onboarded_at: number | null;
 };
-export type Me = { user: User | null; is_pro?: boolean; unread?: number; cards?: number; plans?: number; telegram_linked?: boolean; mfa_required?: boolean; mfa?: { totp: boolean; passkey: boolean }; passkeys?: number };
+export type Me = { user: User | null; is_pro?: boolean; unread?: number; cards?: number; plans?: number; telegram_linked?: boolean; mfa_required?: boolean; mfa?: { totp: boolean; passkey: boolean }; passkeys?: number; demo?: boolean };
 
 export type Card = { id: number; provider: string; brand: string; last4: string; bin: string; mask: string; exp_month: number; exp_year: number; holder: string; issuer: string; is_default: boolean; status: string; created_at: number };
 export type AuditEvent = { action: string; details: string; ip: string; user_agent: string; created_at: number };
@@ -39,7 +39,7 @@ export type Plan = {
   id: number; name: string; icon: string; strategy: string; goal_kop: number | null; goal_date: string | null; amount_kop: number;
   frequency: "daily" | "weekly" | "biweekly" | "monthly" | "manual"; weekday: number; monthday: number; run_minute: number;
   card_id: number | null; status: "active" | "paused" | "closed"; dip_enabled: boolean; dip_threshold_bp: number; dip_multiplier_pct: number;
-  next_run_at: number | null; fail_count: number; created_at: number; closed_at: number | null; allocations: Alloc[];
+  next_run_at: number | null; fail_count: number; created_at: number; closed_at: number | null; allocations: Alloc[]; waiting?: boolean;
   valuation: Valuation; card: Card | null; risk: number; monthly_kop: number; goal_progress_bp: number; goal_eta: string | null;
   goal_need_kop: number | null; next_runs: number[];
 };

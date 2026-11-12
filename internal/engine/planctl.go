@@ -8,6 +8,9 @@ import (
 	"autoinvest/internal/store"
 )
 
+// ErrWaitlist — до запуска настоящие пополнения закрыты (LAUNCH_MODE=waitlist).
+var ErrWaitlist = errors.New("Пополнения откроются совсем скоро — вы в списке первых. А пока попробуйте демо-счёт на сайте")
+
 // ErrNoCardResume — копилку нельзя включить: у пользователя нет ни одной карты.
 var ErrNoCardResume = errors.New("Привяжите карту, чтобы включить копилку")
 
@@ -28,6 +31,12 @@ func (e *Engine) PausePlan(ctx context.Context, p *store.Plan, ip string) error 
 func (e *Engine) ResumePlan(ctx context.Context, p *store.Plan, ip string) error {
 	if p.Status == "closed" {
 		return ErrPlanClosed
+	}
+	if e.Cfg != nil && e.Cfg.LaunchMode == "waitlist" {
+		if u, err := e.St.UserByID(ctx, p.UserID); err == nil && !u.IsDemo() {
+			e.St.JoinWaitlist(ctx, u.ID)
+			return ErrWaitlist
+		}
 	}
 	if p.CardID == nil {
 		c, err := e.St.DefaultCard(ctx, p.UserID)

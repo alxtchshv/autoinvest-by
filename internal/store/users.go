@@ -67,7 +67,15 @@ type User struct {
 	CreatedAt        int64  `json:"created_at"`
 	LastLoginAt      *int64 `json:"last_login_at"`
 	OnboardedAt      *int64 `json:"onboarded_at"`
+	DemoOf           *int64 `json:"demo_of"`     // демо-счёт: id основного аккаунта
+	WaitlistAt       *int64 `json:"waitlist_at"` // встал в лист ожидания запуска
+	UTMSource        string `json:"utm_source"`
+	UTMCampaign      string `json:"utm_campaign"`
+	BonusProDays     int    `json:"bonus_pro_days"` // подарок к запуску за идеи и найденные ошибки
 }
+
+// IsDemo — это демо-счёт (теневой пользователь с виртуальными деньгами).
+func (u *User) IsDemo() bool { return u.DemoOf != nil }
 
 // IsPro — действует ли подписка.
 func (u *User) IsPro() bool {
@@ -78,7 +86,8 @@ func (u *User) IsStaff() bool { return u.Role == "admin" || u.Role == "support" 
 
 const userCols = `id, email, email_verified_at, phone, name, password_hash, role, status, totp_secret, totp_enabled,
 recovery_codes, tier, pro_until, pro_autorenew, pro_period, referral_code, referred_by, referral_rewarded, risk_profile,
-kyc_status, telegram_chat_id, telegram_username, notify_email, notify_telegram, notify_market, created_at, last_login_at, totp_last_step, onboarded_at, phone_verified_at`
+kyc_status, telegram_chat_id, telegram_username, notify_email, notify_telegram, notify_market, created_at, last_login_at, totp_last_step, onboarded_at, phone_verified_at,
+demo_of, waitlist_at, utm_source, utm_campaign, bonus_pro_days`
 
 // userColsU — те же колонки с префиксом таблицы u (для JOIN).
 var userColsU = "u." + strings.ReplaceAll(strings.Join(strings.Fields(userCols), " "), ", ", ", u.")
@@ -87,11 +96,12 @@ type scanner interface{ Scan(...any) error }
 
 func scanUser(r scanner) (*User, error) {
 	var u User
-	var verified, proUntil, refBy, tg, lastLogin, onboarded, phoneVerified sql.NullInt64
+	var verified, proUntil, refBy, tg, lastLogin, onboarded, phoneVerified, demoOf, waitlist sql.NullInt64
 	err := r.Scan(&u.ID, &u.Email, &verified, &u.Phone, &u.Name, &u.PasswordHash, &u.Role, &u.Status, &u.TOTPSecret,
 		&u.TOTPEnabled, &u.RecoveryCodes, &u.Tier, &proUntil, &u.ProAutorenew, &u.ProPeriod, &u.ReferralCode, &refBy,
 		&u.ReferralRewarded, &u.RiskProfile, &u.KYCStatus, &tg, &u.TelegramUsername, &u.NotifyEmail, &u.NotifyTelegram,
-		&u.NotifyMarket, &u.CreatedAt, &lastLogin, &u.TOTPLastStep, &onboarded, &phoneVerified)
+		&u.NotifyMarket, &u.CreatedAt, &lastLogin, &u.TOTPLastStep, &onboarded, &phoneVerified,
+		&demoOf, &waitlist, &u.UTMSource, &u.UTMCampaign, &u.BonusProDays)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -103,6 +113,7 @@ func scanUser(r scanner) (*User, error) {
 	u.OnboardedAt = nullInt(onboarded)
 	u.PhoneVerified = phoneVerified.Valid && u.Phone != ""
 	u.HasPassword = u.PasswordHash != ""
+	u.DemoOf, u.WaitlistAt = nullInt(demoOf), nullInt(waitlist)
 	return &u, nil
 }
 
@@ -163,7 +174,7 @@ func (s *Store) UpdateUserFields(ctx context.Context, id int64, fields map[strin
 	allowed := map[string]bool{"name": true, "phone": true, "password_hash": true, "totp_secret": true, "totp_enabled": true,
 		"recovery_codes": true, "tier": true, "pro_until": true, "pro_autorenew": true, "pro_period": true, "risk_profile": true,
 		"kyc_status": true, "telegram_chat_id": true, "telegram_username": true, "notify_email": true, "notify_telegram": true,
-		"notify_market": true, "status": true, "role": true, "email_verified_at": true, "last_login_at": true, "referral_rewarded": true, "email": true, "totp_last_step": true, "onboarded_at": true, "phone_verified_at": true}
+		"notify_market": true, "status": true, "role": true, "email_verified_at": true, "last_login_at": true, "referral_rewarded": true, "email": true, "totp_last_step": true, "onboarded_at": true, "phone_verified_at": true, "waitlist_at": true, "utm_source": true, "utm_campaign": true}
 	var sets []string
 	var args []any
 	for k, v := range fields {

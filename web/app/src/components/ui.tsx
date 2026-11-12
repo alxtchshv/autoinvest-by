@@ -204,7 +204,8 @@ export function OrderStatus({ s }: { s: string }) {
   return <span className={`badge ${c}`}>{t}</span>;
 }
 
-export function PlanStatus({ s }: { s: string }) {
+export function PlanStatus({ s, waiting }: { s: string; waiting?: boolean }) {
+  if (waiting) return <span className="badge badge-warn">Ждёт запуска</span>;
   if (s === "active") return <span className="badge badge-up">Работает</span>;
   if (s === "paused") return <span className="badge">На паузе</span>;
   return <span className="badge">Закрыта</span>;
@@ -276,6 +277,7 @@ const TCtx = createContext<(text: string, kind?: "ok" | "error") => void>(() => 
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [list, setList] = useState<Toast[]>([]);
   const push = useCallback((text: string, kind: "ok" | "error" = "ok") => {
+    if (!text) return; // пустые ошибки (например, лист ожидания — у него своё окно) не показываем
     const id = Date.now() + Math.random();
     // старые тосты не исчезают рывком: сначала помечаем «уходит», через время анимации удаляем
     const leave = (tid: number) => {

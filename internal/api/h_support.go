@@ -33,12 +33,24 @@ func (s *Server) readNotifications(w http.ResponseWriter, r *http.Request) {
 }
 
 var ticketCategories = map[string]string{
+	"idea": "Идея по улучшению", "bug": "Нашёл ошибку",
 	"payments": "Платежи и карты", "plans": "Копилки и пополнения", "withdraw": "Вывод денег",
 	"account": "Аккаунт и вход", "kyc": "Верификация", "other": "Другое",
 }
 
+// supportUser — обращения всегда от основного аккаунта: с демо-счёта пишет тот же человек.
+func (s *Server) supportUser(r *http.Request) *store.User {
+	u := currentUser(r)
+	if u != nil && u.DemoOf != nil {
+		if real, err := s.St.UserByID(r.Context(), *u.DemoOf); err == nil {
+			return real
+		}
+	}
+	return u
+}
+
 func (s *Server) listTickets(w http.ResponseWriter, r *http.Request) {
-	list, err := s.St.Tickets(r.Context(), currentUser(r).ID, "", 100)
+	list, err := s.St.Tickets(r.Context(), s.supportUser(r).ID, "", 100)
 	if err != nil {
 		s.internal(w, r, err)
 		return
@@ -47,7 +59,7 @@ func (s *Server) listTickets(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) createTicket(w http.ResponseWriter, r *http.Request) {
-	u := currentUser(r)
+	u := s.supportUser(r)
 	var in struct {
 		Subject  string `json:"subject"`
 		Category string `json:"category"`
@@ -98,7 +110,7 @@ func (s *Server) alertSupport(text string) {
 }
 
 func (s *Server) getTicket(w http.ResponseWriter, r *http.Request) {
-	t, err := s.St.Ticket(r.Context(), currentUser(r).ID, pathID(r))
+	t, err := s.St.Ticket(r.Context(), s.supportUser(r).ID, pathID(r))
 	if err != nil {
 		s.internal(w, r, err)
 		return
@@ -107,7 +119,7 @@ func (s *Server) getTicket(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) replyTicket(w http.ResponseWriter, r *http.Request) {
-	u := currentUser(r)
+	u := s.supportUser(r)
 	t, err := s.St.Ticket(r.Context(), u.ID, pathID(r))
 	if err != nil {
 		s.internal(w, r, err)
@@ -138,7 +150,7 @@ func (s *Server) replyTicket(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) closeTicket(w http.ResponseWriter, r *http.Request) {
-	u := currentUser(r)
+	u := s.supportUser(r)
 	t, err := s.St.Ticket(r.Context(), u.ID, pathID(r))
 	if err != nil {
 		s.internal(w, r, err)

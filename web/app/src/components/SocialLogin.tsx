@@ -1,6 +1,7 @@
 // Кнопки «Войти через Google / Apple». Переход полной навигацией: дальше редиректы провайдера и сервера.
 import { Link } from "react-router-dom";
 import { useSession } from "../lib/session";
+import { utmQuery } from "../lib/utm";
 
 export function GoogleMark() {
   return (
@@ -26,7 +27,8 @@ export function SocialButtons({ next, compact }: { next?: string; compact?: bool
   const { config } = useSession();
   const a = config?.auth;
   if (!a || (a.google === "off" && a.apple === "off")) return null;
-  const q = next ? "?next=" + encodeURIComponent(next) : "";
+  const params = [next ? "next=" + encodeURIComponent(next) : "", utmQuery()].filter(Boolean).join("&");
+  const q = params ? "?" + params : "";
   return (
     <div className={`social ${compact ? "compact" : ""}`}>
       {a.google !== "off" && <a className="btn btn-secondary btn-lg social-btn" href={`/oauth/google/start${q}`}><GoogleMark />Продолжить с Google</a>}

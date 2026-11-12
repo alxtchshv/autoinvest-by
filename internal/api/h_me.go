@@ -257,7 +257,7 @@ var auditLabels = map[string]string{
 	"auth.password_reset": "Восстановление пароля", "auth.email_verified": "Подтверждена почта", "auth.recovery_code_used": "Использован код восстановления",
 	"security.password_changed": "Смена пароля", "security.2fa_enabled": "Включена двухфакторная защита", "security.2fa_disabled": "Отключена двухфакторная защита",
 	"security.sessions_revoked": "Завершены другие сеансы", "security.session_revoked": "Завершён сеанс", "security.sessions_revoked_all": "Выход на всех устройствах",
-	"security.audit_export": "Выгружен журнал действий", "admin.export": "Сотрудник выгрузил данные",
+	"security.audit_export": "Выгружен журнал действий", "admin.export": "Сотрудник выгрузил данные", "launch.bonus": "Подарок Pro к запуску", "demo.enter": "Открыт демо-счёт",
 	"card.added": "Привязана карта", "card.removed": "Удалена карта", "card.default": "Изменена основная карта",
 	"plan.created": "Создана копилка", "plan.updated": "Изменена копилка", "plan.paused": "Копилка на паузе", "plan.resumed": "Копилка включена",
 	"plan.withdraw": "Вывод", "plan.closed": "Закрыта копилка",

@@ -1,6 +1,7 @@
 // До запуска (LAUNCH_MODE=waitlist): лист ожидания, переход на демо-счёт и плашка демо-счёта.
 // Окно листа ожидания открывается само, когда сервер отвечает code=waitlist (оплата, карта, пополнение).
 import { useEffect, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import { Gift, PlayCircle } from "lucide-react";
 import { api } from "../lib/api";
 import { useSession } from "../lib/session";
@@ -27,11 +28,12 @@ export function useDemoSwitch() {
 }
 
 /** Содержимое «вы в листе ожидания»: место, бонус, демо-счёт и обратная связь. */
-export function WaitlistContent({ position, onDone }: { position?: number; onDone?: () => void }) {
+export function WaitlistContent({ position, onDone, welcome }: { position?: number; onDone?: () => void; welcome?: boolean }) {
   const { me } = useSession();
   const demo = useDemoSwitch();
   return (
     <div className="wl stack g16">
+      {welcome && <p className="wl-hello">Копилка сохранена{me?.user?.name ? `, ${me.user.name.split(" ")[0]}` : ""}! Мы готовим запуск пополнений — а пока всё можно попробовать на демо-счёте.</p>}
       <div className="wl-head">
         <span className="wl-num">{position ? `№${position}` : "✓"}</span>
         <div>
@@ -51,14 +53,15 @@ export function WaitlistContent({ position, onDone }: { position?: number; onDon
 /** Окно листа ожидания: открывается по событию ai:waitlist (его шлёт api.ts на ответ code=waitlist). */
 export function WaitlistModal() {
   const [pos, setPos] = useState<number | null>(null);
+  const [welcome, setWelcome] = useState(false);
   useEffect(() => {
-    const h = (e: Event) => setPos((e as CustomEvent).detail?.position || 0);
+    const h = (e: Event) => { const d = (e as CustomEvent).detail; setWelcome(!!d?.first); setPos(d?.position || 0); };
     window.addEventListener("ai:waitlist", h);
     return () => window.removeEventListener("ai:waitlist", h);
   }, []);
   return (
-    <Modal open={pos !== null} onClose={() => setPos(null)} title="Скоро запуск">
-      <WaitlistContent position={pos || undefined} onDone={() => setPos(null)} />
+    <Modal open={pos !== null} onClose={() => setPos(null)} title={welcome ? "Добро пожаловать в AutoInvest" : "Скоро запуск"}>
+      <WaitlistContent position={pos || undefined} welcome={welcome} onDone={() => setPos(null)} />
     </Modal>
   );
 }
@@ -74,6 +77,32 @@ export function DemoBar() {
       <button type="button" onClick={demo.exit} disabled={demo.busy}>Вернуться в мой аккаунт</button>
     </div>
   );
+}
+
+/** Пункт «Демо-счёт» в меню: всегда под рукой у того, кто настроил копилку до запуска. */
+export function DemoNavButton({ collapsed }: { collapsed?: boolean }) {
+  const { me, config } = useSession();
+  const demo = useDemoSwitch();
+  if (config?.launch !== "waitlist" || me?.demo || !me?.plans || me.user?.role !== "user") return null;
+  return (
+    <button type="button" className="nav-demo" title={collapsed ? "Демо-счёт" : undefined} onClick={demo.enter} disabled={demo.busy}>
+      <PlayCircle /><span className="nav-label">Демо-счёт</span>
+    </button>
+  );
+}
+
+/** Сначала анкета: новый человек без копилки из любого раздела кабинета попадает на 4 вопроса
+ *  (вход через Google мог вернуть на другой адрес). «Пропустить» на анкете это снимает. */
+export function OnboardingGuard() {
+  const { me } = useSession();
+  const nav = useNavigate();
+  const { pathname } = useLocation();
+  const need = !!me?.user && me.user.role === "user" && !me.demo && !me.user.onboarded_at && !me.plans;
+  const free = /^\/app\/(onboarding|plans\/new|profile|support|notifications)/.test(pathname);
+  useEffect(() => {
+    if (need && !free) nav("/app/onboarding", { replace: true });
+  }, [need, free, nav]);
+  return null;
 }
 
 /** Карточка на главной для настоящего аккаунта в листе ожидания. */

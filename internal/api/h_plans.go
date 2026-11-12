@@ -382,8 +382,8 @@ func (s *Server) createPlan(w http.ResponseWriter, r *http.Request) {
 	p, _ = s.St.Plan(r.Context(), u.ID, p.ID)
 	resp := map[string]any{"plan": s.viewPlan(r, p, s.cardMap(r, u.ID)), "topup_error": topupErr}
 	if waiting {
-		pos, _ := s.joinWaitlist(r.Context(), u)
-		resp["waitlist"] = map[string]any{"position": pos}
+		pos, first, _ := s.joinWaitlist(r.Context(), u)
+		resp["waitlist"] = map[string]any{"position": pos, "first": first}
 	}
 	writeJSON(w, http.StatusCreated, resp)
 }

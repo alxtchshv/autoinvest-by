@@ -216,7 +216,7 @@ export default function PlanNew() {
 
   const create = async (ack = false) => {
     try {
-      const r = await s.submit(() => api.post<{ plan: Plan; topup_error: string; waitlist?: { position: number } }>("/plans", {
+      const r = await s.submit(() => api.post<{ plan: Plan; topup_error: string; waitlist?: { position: number; first?: boolean } }>("/plans", {
         name: name.trim(), icon, goal_kop: goalKop || undefined, goal_date: goalDate || undefined, amount_kop: amountKop,
         frequency: sched.frequency, weekday: sched.weekday, monthday: sched.monthday, run_minute: sched.run_minute,
         strategy, allocations: strategy === "custom" ? allocs : undefined, card_id: cardId ?? undefined, dip_enabled: dip,
@@ -227,7 +227,7 @@ export default function PlanNew() {
       if (r.waitlist) {
         // до запуска: копилка сохранена и ждёт, человек — в листе ожидания (окно с демо-счётом)
         nav(`/app/plans/${r.plan.id}`, { replace: true });
-        window.dispatchEvent(new CustomEvent("ai:waitlist", { detail: { position: r.waitlist.position } }));
+        window.dispatchEvent(new CustomEvent("ai:waitlist", { detail: { position: r.waitlist.position, first: r.waitlist.first } }));
         return;
       }
       if (r.topup_error) toast("Копилка создана, но первое пополнение не прошло: " + r.topup_error, "error");

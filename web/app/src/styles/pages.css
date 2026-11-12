@@ -634,3 +634,10 @@
 .auth-compact .auth-checks .check { font-size: 13px; line-height: 18px; }
 .auth-google-note { text-align: center; margin: -2px 0 0; line-height: 16px; }
 .mt4 { margin-top: 4px; }
+
+/* «Демо-счёт» в меню — как обычный пункт */
+.nav-demo { display: flex; align-items: center; gap: 12px; height: 40px; padding: 0 12px; border-radius: 10px; color: var(--ink-2); font-weight: 540; background: none; border: 0; font: inherit; cursor: pointer; text-align: left; width: 100%; }
+.nav-demo svg { width: 19px; height: 19px; color: var(--brand); flex: none; }
+.nav-demo:hover { background: var(--line-2); color: var(--ink); }
+.shell.collapsed .nav-demo { justify-content: center; padding: 0; gap: 0; }
+.wl-hello { margin: 0; color: var(--ink-2); line-height: 1.5; }

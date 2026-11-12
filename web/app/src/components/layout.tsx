@@ -1,6 +1,6 @@
 import { Suspense, useEffect, useRef, useState, type ReactNode } from "react";
 import { BiometricOffer } from "./BiometricOffer";
-import { DemoBar, WaitlistModal } from "./Waitlist";
+import { DemoBar, DemoNavButton, OnboardingGuard, WaitlistModal } from "./Waitlist";
 import { Link, NavLink, Navigate, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { Menu, X, PanelLeftClose, PanelLeftOpen, Bell, ChartCandlestick, CreditCard, Eye, EyeOff, History, House, LifeBuoy, PiggyBank, Calculator, Shield, LogOut, User } from "lucide-react";
 import { api } from "../lib/api";
@@ -70,6 +70,7 @@ export function AppShell() {
           <nav className="nav" aria-label="Разделы">
             {NAV.map((n) => item(n.to, n.label, n.icon, n.end))}
             <div className="nav-sep" />
+            <DemoNavButton collapsed={collapsed} />
             {item("/app/support", "Поддержка", LifeBuoy)}
             {me?.user && (me.user.role === "admin" || me.user.role === "support") && item("/admin", "Админка", Shield)}
           </nav>
@@ -88,6 +89,7 @@ export function AppShell() {
           <DemoBar />
           <TopBar />
           <main className="content" id="main">
+            <OnboardingGuard />
             <BiometricOffer />
             <WaitlistModal />
             <Suspense fallback={<PageLoader />}><Outlet /></Suspense>

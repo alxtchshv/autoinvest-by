@@ -434,9 +434,15 @@ func (s *Server) mePayload(r *http.Request, u *store.User) map[string]any {
 	_, unread, _ := s.St.Notifications(r.Context(), u.ID, 1)
 	cards, _ := s.St.Cards(r.Context(), u.ID)
 	plans, _ := s.St.CountOpenPlans(r.Context(), u.ID)
+	tg := u.TelegramChatID != nil
+	if u.IsDemo() { // Telegram живёт в основном аккаунте
+		if real, err := s.St.UserByID(r.Context(), *u.DemoOf); err == nil {
+			tg = real.TelegramChatID != nil
+		}
+	}
 	return map[string]any{
 		"user": u, "is_pro": u.IsPro(), "unread": unread, "cards": len(cards), "plans": plans,
-		"telegram_linked": u.TelegramChatID != nil,
+		"telegram_linked": tg,
 		"demo":            u.IsDemo(),
 		"passkeys":        s.St.CountPasskeys(r.Context(), u.ID),
 	}

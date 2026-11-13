@@ -1,5 +1,6 @@
 import { Suspense, useEffect, useRef, useState, type ReactNode } from "react";
 import { BiometricOffer } from "./BiometricOffer";
+import { TelegramOffer } from "./TelegramOffer";
 import { DemoBar, DemoNavButton, OnboardingGuard, WaitlistModal } from "./Waitlist";
 import { Link, NavLink, Navigate, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { Menu, X, PanelLeftClose, PanelLeftOpen, Bell, ChartCandlestick, CreditCard, Eye, EyeOff, History, House, LifeBuoy, PiggyBank, Calculator, Shield, LogOut, User } from "lucide-react";
@@ -90,6 +91,7 @@ export function AppShell() {
           <TopBar />
           <main className="content" id="main">
             <OnboardingGuard />
+            <TelegramOffer />
             <BiometricOffer />
             <WaitlistModal />
             <Suspense fallback={<PageLoader />}><Outlet /></Suspense>

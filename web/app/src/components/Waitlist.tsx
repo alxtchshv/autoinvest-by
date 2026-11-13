@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { Gift, PlayCircle } from "lucide-react";
 import { api } from "../lib/api";
+import { setWelcomePending } from "../lib/offers";
 import { useSession } from "../lib/session";
 import type { Me } from "../lib/types";
 import { Button, Modal, useToast } from "./ui";
@@ -55,13 +56,19 @@ export function WaitlistModal() {
   const [pos, setPos] = useState<number | null>(null);
   const [welcome, setWelcome] = useState(false);
   useEffect(() => {
-    const h = (e: Event) => { const d = (e as CustomEvent).detail; setWelcome(!!d?.first); setPos(d?.position || 0); };
+    const h = (e: Event) => {
+      const d = (e as CustomEvent).detail;
+      setWelcome(!!d?.first);
+      if (d?.first) setWelcomePending(true); // подсказки (Telegram, Face ID) подождут, пока приветствие не закроют
+      setPos(d?.position || 0);
+    };
     window.addEventListener("ai:waitlist", h);
     return () => window.removeEventListener("ai:waitlist", h);
   }, []);
+  const close = () => { setPos(null); setWelcomePending(false); };
   return (
-    <Modal open={pos !== null} onClose={() => setPos(null)} title={welcome ? "Добро пожаловать в AutoInvest" : "Скоро запуск"}>
-      <WaitlistContent position={pos || undefined} welcome={welcome} onDone={() => setPos(null)} />
+    <Modal open={pos !== null} onClose={close} title={welcome ? "Добро пожаловать в AutoInvest" : "Скоро запуск"}>
+      <WaitlistContent position={pos || undefined} welcome={welcome} onDone={close} />
     </Modal>
   );
 }

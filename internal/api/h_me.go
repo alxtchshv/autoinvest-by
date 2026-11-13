@@ -465,7 +465,7 @@ func (s *Server) telegramLink(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	code := auth.RandomCode(24, "abcdefghijkmnopqrstuvwxyz23456789")
-	if err := s.St.CreateTelegramLink(r.Context(), currentUser(r).ID, code, 15*60); err != nil {
+	if err := s.St.CreateTelegramLink(r.Context(), realUserID(currentUser(r)), code, 15*60); err != nil {
 		s.internal(w, r, err)
 		return
 	}

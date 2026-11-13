@@ -63,6 +63,10 @@ func (s *Server) demoGuard(w http.ResponseWriter, r *http.Request) bool {
 	if u == nil || !u.IsDemo() {
 		return false
 	}
+	// подключить Telegram с демо-счёта можно — он привяжется к основному аккаунту (отключить — только оттуда)
+	if r.URL.Path == "/api/v1/telegram/link" && r.Method == http.MethodPost {
+		return false
+	}
 	for _, p := range demoDenied {
 		if strings.HasPrefix(r.URL.Path, p) && (r.Method != http.MethodGet || p != "/api/v1/billing") {
 			writeJSON(w, http.StatusForbidden, apiErr{Error: "На демо-счёте это недоступно — вернитесь в основной аккаунт", Code: "demo"})
@@ -98,8 +102,8 @@ func (s *Server) waitlistJoin(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"joined": true, "position": pos})
 }
 
-// joinWaitlist — в лист ожидания; при первом попадании — уведомления: идеи и ошибки (за полезные — Pro),
-// и, если Telegram ещё не подключён, предложение подключить его. Окно листа ожидания остаётся коротким.
+// joinWaitlist — в лист ожидания; при первом попадании — уведомление про идеи и ошибки (за полезные — Pro).
+// Telegram предлагает отдельная карточка в кабинете — после приветствия, чтобы не было трёх всплывашек сразу.
 func (s *Server) joinWaitlist(ctx context.Context, u *store.User) (int, bool, error) {
 	pos, first, err := s.St.JoinWaitlistFirst(ctx, u.ID)
 	if err != nil || !first {
@@ -108,11 +112,6 @@ func (s *Server) joinWaitlist(ctx context.Context, u *store.User) (int, bool, er
 	s.N.Send(ctx, u.ID, notify.Message{Kind: "support", Title: "Помогите сделать AutoInvest лучше",
 		Body: "Нашли ошибку или есть идея? Напишите нам в поддержку — за полезные предложения добавим дни Pro к запуску.",
 		Link: "/app/support?new=idea"})
-	if u.TelegramChatID == nil && s.Bot != nil {
-		s.N.Send(ctx, u.ID, notify.Message{Kind: "billing", Title: "Узнайте о запуске первыми",
-			Body: "Подключите Telegram — пришлём новость о запуске и коды входа прямо в чат.",
-			Link: "/app/profile/notifications"})
-	}
 	return pos, true, nil
 }
 
@@ -215,7 +214,17 @@ func (s *Server) seedDemo(ctx context.Context, real, d *store.User) {
 			continue
 		}
 		if _, err := s.En.Buy(ctx, cp.ID, cp.AmountKop, "manual", fmt.Sprintf("demo_first_%d", cp.ID)); err != nil {
-			s.Log.Warn("demo: первое пополнение", "err", err)
+			// котировки ещё грузятся (сервер только запустился) или биржа на минуту недоступна — повторяем в фоне,
+			// чтобы демо-счёт не остался пустым
+			s.Log.Warn("demo: первое пополнение, повторим", "err", err)
+			go func(planID, amount int64) {
+				for i := 1; i <= 8; i++ {
+					time.Sleep(15 * time.Second)
+					if _, err := s.En.Buy(context.Background(), planID, amount, "manual", fmt.Sprintf("demo_first_%d_%d", planID, i)); err == nil {
+						return
+					}
+				}
+			}(cp.ID, cp.AmountKop)
 		}
 	}
 	msg := notify.Message{Kind: "welcome", Title: "Это ваш демо-счёт",

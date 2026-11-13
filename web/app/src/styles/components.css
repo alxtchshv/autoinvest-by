@@ -172,7 +172,7 @@ button.list-row { width: 100%; border-left: 0; border-right: 0; border-bottom: 0
 @keyframes slide { from { transform: translateY(40px); opacity: .6; } }
 
 /* ---------- уведомления-тосты ---------- */
-.toasts { position: fixed; z-index: 200; right: 20px; bottom: 20px; display: flex; flex-direction: column; gap: 8px; max-width: min(380px, calc(100vw - 40px)); }
+.toasts { position: fixed; z-index: 200; right: 20px; bottom: calc(20px + var(--offer-h, 0px)); transition: bottom .35s cubic-bezier(.2, .9, .3, 1); display: flex; flex-direction: column; gap: 8px; max-width: min(380px, calc(100vw - 40px)); }
 .toast { background: var(--ink); color: #fff; padding: 12px 16px; border-radius: 12px; box-shadow: var(--shadow-pop); font-size: 14px; display: flex; gap: 10px; align-items: flex-start; max-height: 160px; animation: toastIn .34s cubic-bezier(.2, .9, .3, 1.15); }
 .toast.out { animation: toastOut .26s ease-in forwards; overflow: hidden; }
 @keyframes toastIn { from { opacity: 0; transform: translateY(16px) scale(.96); } }
@@ -359,3 +359,5 @@ button.list-row { width: 100%; border-left: 0; border-right: 0; border-bottom: 0
 .phone-input .phone-cc { position: absolute; left: 14px; top: 50%; transform: translateY(-50%); color: var(--ink); font-size: 15px; pointer-events: none; font-variant-numeric: tabular-nums; }
 .phone-input .input { padding-left: 58px; font-variant-numeric: tabular-nums; }
 .phone-input .input:disabled + .phone-cc, .phone-input:has(.input:disabled) .phone-cc { color: var(--muted); }
+
+.bio-ic.tg { color: #229ED9; background: #E8F5FC; }

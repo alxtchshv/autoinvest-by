@@ -289,7 +289,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       if (live.length >= 3) setTimeout(() => leave(live[0].id), 0);
       return [...l, { id, text, kind }];
     });
-    setTimeout(() => leave(id), kind === "error" ? 6000 : 3500);
+    setTimeout(() => leave(id), kind === "error" ? 8000 : 6000); // успеть прочитать, даже если смотрят на окно рядом
   }, []);
   return (
     <TCtx.Provider value={push}>

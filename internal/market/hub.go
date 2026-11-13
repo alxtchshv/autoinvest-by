@@ -23,6 +23,7 @@ type candleKey struct{ sym, interval string }
 type candleEntry struct {
 	at      time.Time
 	candles []Candle // USD
+	want    int      // сколько свечей просили при загрузке: если биржа отдала меньше (акции на 4 ч), не перезапрашиваем каждый раз
 }
 
 type SourceStatus struct {
@@ -53,6 +54,7 @@ type Hub struct {
 	usdHist  map[string]float64
 	histAt   time.Time
 	candles  map[candleKey]candleEntry
+	candBusy map[candleKey]bool // свечи уже обновляются в фоне — второй запрос не нужен
 	daily    map[string]candleEntry
 	status   map[string]*SourceStatus
 	subs     map[chan Event]struct{}
@@ -76,7 +78,7 @@ const ratesFreshFor = 26 * time.Hour
 
 func NewHub(sources []Source, rates RateSource, spreadBP int64, fixture bool, log *slog.Logger) *Hub {
 	h := &Hub{sources: sources, rateSrc: rates, spreadBP: spreadBP, fixture: fixture, log: log,
-		quotes: map[string]Quote{}, usdHist: map[string]float64{}, candles: map[candleKey]candleEntry{},
+		quotes: map[string]Quote{}, usdHist: map[string]float64{}, candles: map[candleKey]candleEntry{}, candBusy: map[candleKey]bool{},
 		daily: map[string]candleEntry{}, fallbackAt: map[string]time.Time{}, status: map[string]*SourceStatus{}, subs: map[chan Event]struct{}{}}
 	for _, s := range sources {
 		h.status[s.Name()] = &SourceStatus{Name: s.Name()}
@@ -522,10 +524,13 @@ func (h *Hub) Candles(ctx context.Context, sym, interval, currency string, limit
 	h.mu.RLock()
 	ent, ok := h.candles[key]
 	h.mu.RUnlock()
-	if !ok || time.Since(ent.at) > candleTTL[interval] || len(ent.candles) < limit {
-		fresh, err := h.fetchCandles(ctx, a, interval, max(limit, 300), 0)
+	need := max(limit, 300)
+	switch {
+	case !ok || ent.want < limit:
+		// свечей ещё нет (или загружено меньше, чем просят сейчас) — ждём биржу
+		fresh, err := h.fetchCandles(ctx, a, interval, need, 0)
 		if err == nil && len(fresh) > 0 {
-			ent = candleEntry{at: time.Now(), candles: fresh}
+			ent = candleEntry{at: time.Now(), candles: fresh, want: need}
 			h.mu.Lock()
 			h.candles[key] = ent
 			h.mu.Unlock()
@@ -535,6 +540,10 @@ func (h *Hub) Candles(ctx context.Context, sym, interval, currency string, limit
 			}
 			return nil, err
 		}
+	case time.Since(ent.at) > candleTTL[interval]:
+		// устарели — отдаём то, что есть (последняя свеча всё равно доживляется текущей ценой), и обновляем в фоне:
+		// человек не ждёт медленный Yahoo/биржу по 3–10 секунд
+		h.refreshCandlesAsync(a, key, need)
 	}
 	usdC = append([]Candle(nil), ent.candles...)
 	if len(usdC) > limit {
@@ -563,6 +572,46 @@ func (h *Hub) Candles(ctx context.Context, sym, interval, currency string, limit
 		h.mu.RUnlock()
 	}
 	return usdC, nil
+}
+
+func (h *Hub) refreshCandlesAsync(a Asset, key candleKey, need int) {
+	h.mu.Lock()
+	if h.candBusy[key] {
+		h.mu.Unlock()
+		return
+	}
+	h.candBusy[key] = true
+	h.mu.Unlock()
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		fresh, err := h.fetchCandles(ctx, a, key.interval, need, 0)
+		h.mu.Lock()
+		if err == nil && len(fresh) > 0 {
+			h.candles[key] = candleEntry{at: time.Now(), candles: fresh, want: need}
+		}
+		delete(h.candBusy, key)
+		h.mu.Unlock()
+	}()
+}
+
+// WarmCandles — заранее загрузить графики, которые открываются по умолчанию (1 ч и день), чтобы первый посетитель
+// не ждал внешние источники. Вызывается при старте и периодически.
+func (h *Hub) WarmCandles(ctx context.Context) {
+	for _, a := range Catalog {
+		if a.Kind == "stable" || a.Kind == "bond" {
+			continue
+		}
+		for _, iv := range []struct {
+			name  string
+			limit int
+		}{{"1h", 336}, {"1d", 365}, {"4h", 360}, {"15m", 192}, {"1w", 260}} {
+			if ctx.Err() != nil {
+				return
+			}
+			h.Candles(ctx, a.Symbol, iv.name, "USD", iv.limit)
+		}
+	}
 }
 
 func (h *Hub) fetchCandles(ctx context.Context, a Asset, interval string, limit int, start int64) ([]Candle, error) {

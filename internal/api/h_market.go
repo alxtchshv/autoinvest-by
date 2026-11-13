@@ -19,14 +19,22 @@ func (s *Server) marketOverview(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"assets": market.Catalog, "quotes": snap.Quotes, "rates": snap.Rates, "strategies": market.Strategies, "demo": s.Hub.IsFixture()})
 }
 
-func (s *Server) assetStats(r *http.Request, sym string) (market.Stats, bool) {
+func (s *Server) assetStats(ctx context.Context, sym string) (market.Stats, bool) {
 	s.statsMu.Lock()
 	e, ok := s.stats[sym]
 	s.statsMu.Unlock()
-	if ok && time.Since(e.at) < time.Hour {
+	if ok {
+		// год истории меняется медленно: старое отдаём сразу, раз в час пересчитываем в фоне
+		if time.Since(e.at) > time.Hour {
+			go s.computeStats(context.Background(), sym)
+		}
 		return e.stats, true
 	}
-	daily, err := s.Hub.DailyHistory(r.Context(), sym, time.Now().AddDate(-1, 0, -5))
+	return s.computeStats(ctx, sym)
+}
+
+func (s *Server) computeStats(ctx context.Context, sym string) (market.Stats, bool) {
+	daily, err := s.Hub.DailyHistory(ctx, sym, time.Now().AddDate(-1, 0, -5))
 	if err != nil || len(daily) < 10 {
 		return market.Stats{}, false
 	}
@@ -35,6 +43,32 @@ func (s *Server) assetStats(r *http.Request, sym string) (market.Stats, bool) {
 	s.stats[sym] = statsEntry{at: time.Now(), stats: st}
 	s.statsMu.Unlock()
 	return st, true
+}
+
+// WarmMarket — заранее посчитать статистику и загрузить графики всех активов, при старте и раз в 20 минут:
+// первый посетитель «Рынка» не ждёт внешние источники.
+func (s *Server) WarmMarket(ctx context.Context) {
+	run := func() {
+		for _, a := range market.Catalog {
+			if ctx.Err() != nil {
+				return
+			}
+			s.computeStats(ctx, a.Symbol)
+		}
+		s.Hub.WarmCandles(ctx)
+	}
+	time.Sleep(5 * time.Second) // дать загрузиться котировкам и курсу
+	run()
+	t := time.NewTicker(20 * time.Minute)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			run()
+		}
+	}
 }
 
 func (s *Server) marketAsset(w http.ResponseWriter, r *http.Request) {
@@ -49,7 +83,7 @@ func (s *Server) marketAsset(w http.ResponseWriter, r *http.Request) {
 	if qerr == nil {
 		out["quote"] = q
 	}
-	if st, ok := s.assetStats(r, sym); ok {
+	if st, ok := s.assetStats(r.Context(), sym); ok {
 		out["stats"] = st
 	}
 	writeJSON(w, 200, out)

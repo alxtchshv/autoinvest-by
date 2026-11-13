@@ -70,6 +70,7 @@ type Overview = {
 };
 
 export function AdminOverview() {
+  const { me } = useSession();
   useTitle("Админка");
   const { data, error, loading, reload } = useLoad(() => api.get<{ overview: Overview; series: { day: string; signups: number; volume_kop: number }[] }>("/admin/overview"), []);
   if (loading && !data) return <PageLoader />;
@@ -82,6 +83,7 @@ export function AdminOverview() {
     <div className="stack g16">
       <div className="page-head" style={{ marginBottom: 4 }}><h1>Обзор</h1></div>
       <LaunchFunnel />
+      {me?.user?.role === "admin" && <LaunchAnnounce />}
       {(o.pending_kyc > 0 || o.open_tickets > 0 || o.pending_payouts > 0) && (
         <div className="row g8 wrap">
           {o.open_tickets > 0 && <Link to="/admin/tickets?status=open" className="btn btn-secondary btn-sm">Обращений без ответа: {o.open_tickets}</Link>}
@@ -512,6 +514,41 @@ function RewardBar({ userId, category }: { userId: number; category: string }) {
 type Funnel = { visits_30d: number; visits_today: number; registered: number; onboarded: number; plan_created: number; waitlist: number; demo_users: number; demo_invested: number; feedback: number; telegram_links: number; sources: { source: string; campaign: string; visits: number; registered: number; waitlist: number }[] };
 
 // Воронка запуска: сколько людей дошло от посещения до листа ожидания — по ней оцениваем рекламу.
+/** Рассылка о запуске: всем из листа ожидания — в кабинет, на почту и в Telegram. Сначала — проверка себе. */
+function LaunchAnnounce() {
+  const toast = useToast();
+  const [title, setTitle] = useState("AutoInvest запущен — копилки открыты");
+  const [body, setBody] = useState("Пополнения с карты работают. Как обещали, всем из списка ожидания — месяц Pro бесплатно. Зайдите в AutoInvest: ваша копилка уже настроена, осталось привязать карту.");
+  const [busy, setBusy] = useState<"" | "test" | "all">("");
+  const send = async (test: boolean, force = false) => {
+    if (!test && !force && !confirm("Отправить новость о запуске всем из листа ожидания — в кабинет, на почту и в Telegram?")) return;
+    setBusy(test ? "test" : "all");
+    try {
+      const r = await api.post<{ recipients: number; telegram: number; email: number }>("/admin/launch/announce", { title, body, test, force });
+      toast(test ? "Отправлено вам — проверьте почту, Telegram и колокольчик" : `Отправляем ${r.recipients} людям: на почту ${r.email}, в Telegram ${r.telegram}`);
+    } catch (e: any) {
+      if (e?.code === "already_sent" && confirm(e.message)) { setBusy(""); return send(false, true); }
+      toast(e.message, "error");
+    } finally {
+      setBusy("");
+    }
+  };
+  return (
+    <section className="sheet">
+      <div className="sheet-head"><h2>Рассылка о запуске</h2><span className="small muted">всем из листа ожидания: кабинет, почта, Telegram</span></div>
+      <div className="sheet-body stack g12">
+        <Field label="Заголовок" htmlFor="ann-title"><Input id="ann-title" value={title} onChange={(e) => setTitle(e.target.value)} maxLength={120} /></Field>
+        <Field label="Текст" htmlFor="ann-body"><textarea id="ann-body" className="textarea" rows={3} value={body} onChange={(e) => setBody(e.target.value)} maxLength={2000} /></Field>
+        <div className="row g8 wrap">
+          <Button busy={busy === "test"} onClick={() => send(true)}>Отправить себе для проверки</Button>
+          <Button variant="primary" busy={busy === "all"} onClick={() => send(false)}>Отправить всем из списка</Button>
+        </div>
+        <span className="tiny muted">Telegram получат те, кто подключил бота; письма — все, у кого не выключены письма. Отправка идёт по одному сообщению, чтобы почта не посчитала это спамом.</span>
+      </div>
+    </section>
+  );
+}
+
 function LaunchFunnel() {
   const { data } = useLoad(() => api.get<{ funnel: Funnel; mode: string }>("/admin/launch"), []);
   if (!data) return null;

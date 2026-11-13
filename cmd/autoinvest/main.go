@@ -156,21 +156,49 @@ func main() {
 	if bot != nil {
 		bot.SupportChatID = cfg.SupportChatID
 		cctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-		if err := bot.Check(cctx); err != nil {
-			log.Warn("Telegram-бот не запущен", "err", err)
-			bot, tgSandbox = nil, nil
-		} else {
+		err := bot.Check(cctx)
+		cancel()
+		switch {
+		case err == nil:
 			n.SetMessenger(bot)
 			go bot.Run(ctx)
 			log.Info("Telegram-бот запущен", "username", bot.Username, "test", tgSandbox != nil)
+		case tgSandbox == nil && bot.Username != "":
+			// Telegram на минуту недоступен (сеть, VPN) — не выключаем бота до перезапуска, а пробуем снова каждые 30 секунд.
+			// Ссылки «Подключить Telegram» работают сразу: Telegram сохранит /start и отдаст боту, когда тот подключится.
+			log.Warn("Telegram недоступен, повторю подключение каждые 30 с", "err", err)
+			go func(b *telegram.Bot) {
+				for {
+					select {
+					case <-ctx.Done():
+						return
+					case <-time.After(30 * time.Second):
+					}
+					c, cancel := context.WithTimeout(ctx, 10*time.Second)
+					err := b.Check(c)
+					cancel()
+					if err == nil {
+						n.SetMessenger(b)
+						go b.Run(ctx)
+						log.Info("Telegram-бот запущен (со второй попытки)", "username", b.Username)
+						return
+					}
+				}
+			}(bot)
+		default:
+			log.Warn("Telegram-бот не запущен", "err", err, "hint", "укажите TELEGRAM_BOT_USERNAME в .env — тогда бот будет переподключаться сам")
+			bot, tgSandbox = nil, nil
 		}
-		cancel()
 	}
 
 	go en.Run(ctx)
 
 	srv := &api.Server{Cfg: cfg, St: st, DB: d, Hub: hub, En: en, Pay: pay, Sandbox: sandbox, N: n, Bot: bot, TG: tgSandbox, Log: log,
 		Static: web.Dist(), Version: version, Started: time.Now()}
+	go srv.WarmMarket(ctx)
+	if bot != nil {
+		bot.OnSupport = srv.NotifyStaff // обращения из бота — в колокольчик админу и поддержке
+	}
 	if cfg.Market != "fixture" {
 		go srv.WarmShowcase(ctx)
 	}

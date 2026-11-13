@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"fmt"
 	"html"
 	"net/http"
@@ -89,7 +90,8 @@ func (s *Server) createTicket(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, r, err)
 		return
 	}
-	s.alertSupport(fmt.Sprintf("Новое обращение #%d от %s\n<b>%s</b>\n%s\n\nОтветьте на это сообщение (reply), чтобы ответить клиенту.", id, html.EscapeString(u.Email), html.EscapeString(in.Subject), html.EscapeString(truncate(in.Body, 500))))
+	s.alertSupport(r.Context(), id, fmt.Sprintf("Новое обращение #%d: %s", id, in.Subject), u.Email+": "+truncate(in.Body, 160),
+		fmt.Sprintf("Новое обращение #%d от %s\n<b>%s</b>\n%s\n\nОтветьте на это сообщение (reply), чтобы ответить клиенту.", id, html.EscapeString(u.Email), html.EscapeString(in.Subject), html.EscapeString(truncate(in.Body, 500))))
 	t, _ := s.St.Ticket(r.Context(), u.ID, id)
 	writeJSON(w, http.StatusCreated, map[string]any{"ticket": t})
 }
@@ -102,10 +104,35 @@ func truncate(s string, n int) string {
 	return s
 }
 
-// alertSupport пересылает событие в чат поддержки в Telegram (если настроен).
-func (s *Server) alertSupport(text string) {
+// alertSupport — новое обращение или ответ клиента: в группу поддержки в Telegram и в колокольчик
+// всем сотрудникам (админ и поддержка) — со ссылкой на обращение в админке.
+func (s *Server) alertSupport(ctx context.Context, ticketID int64, title, body, tgText string) {
 	if s.Bot != nil && s.Cfg.SupportChatID != 0 {
-		go s.Bot.Send(s.Cfg.SupportChatID, text)
+		go func() {
+			if err := s.Bot.Send(s.Cfg.SupportChatID, tgText); err != nil {
+				s.Log.Warn("поддержка: не ушло в группу Telegram", "ticket", ticketID, "err", err)
+			}
+		}()
+	}
+	s.NotifyStaff(ctx, ticketID, title, body)
+}
+
+// NotifyStaff — уведомление сотрудникам об обращении (его же вызывает бот, когда клиент пишет в поддержку из Telegram).
+func (s *Server) NotifyStaff(ctx context.Context, ticketID int64, title, body string) {
+	rows, err := s.DB.QueryContext(ctx, `SELECT id FROM users WHERE role IN ('admin','support') AND status='active'`)
+	if err != nil {
+		return
+	}
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if rows.Scan(&id) == nil {
+			ids = append(ids, id)
+		}
+	}
+	rows.Close()
+	for _, id := range ids {
+		s.N.Send(ctx, id, notify.Message{Kind: "support", Title: title, Body: body, Link: fmt.Sprintf("/admin/tickets/%d", ticketID)})
 	}
 }
 
@@ -144,8 +171,9 @@ func (s *Server) replyTicket(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, r, err)
 		return
 	}
-	s.alertSupport(fmt.Sprintf("Клиент ответил по обращению #%d (%s)\n<b>%s</b>\n%s\n\nОтветьте на это сообщение (reply), чтобы ответить клиенту.",
-		t.ID, html.EscapeString(u.Email), html.EscapeString(t.Subject), html.EscapeString(truncate(body, 500))))
+	s.alertSupport(r.Context(), t.ID, fmt.Sprintf("Ответ клиента по обращению #%d", t.ID), u.Email+": "+truncate(body, 160),
+		fmt.Sprintf("Клиент ответил по обращению #%d (%s)\n<b>%s</b>\n%s\n\nОтветьте на это сообщение (reply), чтобы ответить клиенту.",
+			t.ID, html.EscapeString(u.Email), html.EscapeString(t.Subject), html.EscapeString(truncate(body, 500))))
 	s.getTicket(w, r)
 }
 

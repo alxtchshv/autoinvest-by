@@ -361,3 +361,6 @@ button.list-row { width: 100%; border-left: 0; border-right: 0; border-bottom: 0
 .phone-input .input:disabled + .phone-cc, .phone-input:has(.input:disabled) .phone-cc { color: var(--muted); }
 
 .bio-ic.tg { color: #229ED9; background: #E8F5FC; }
+
+/* график грузится: подпись поверх, старые свечи видны под ней */
+.chart-loading { position: absolute; z-index: 2; top: 12px; right: 12px; display: flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: 999px; background: var(--surface); border: 1px solid var(--line); box-shadow: var(--shadow-sm, 0 2px 8px rgba(0,0,0,.06)); font-size: 13px; color: var(--muted); animation: fade .25s ease; }

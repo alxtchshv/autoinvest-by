@@ -37,10 +37,12 @@ type Bot struct {
 	PublicURL     string
 	API           string
 	SupportChatID int64 // чат сотрудников: туда приходят новые обращения, ответом на них можно ответить клиенту
-	St            *store.Store
-	En            *engine.Engine
-	Log           *slog.Logger
-	http          *http.Client
+	// OnSupport — обращение или ответ клиента из бота: сервер уведомляет сотрудников в кабинете
+	OnSupport func(ctx context.Context, ticketID int64, title, body string)
+	St        *store.Store
+	En        *engine.Engine
+	Log       *slog.Logger
+	http      *http.Client
 
 	mu      sync.Mutex
 	waiting map[int64]time.Time // чаты, от которых ждём текст вопроса в поддержку
@@ -65,7 +67,8 @@ func (b *Bot) call(ctx context.Context, method string, payload any, out any) err
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := b.http.Do(req)
 	if err != nil {
-		return err
+		// в тексте ошибки есть адрес запроса вместе с токеном — в логи токен не пишем
+		return fmt.Errorf("telegram %s: %s", method, strings.ReplaceAll(err.Error(), b.Token, "***"))
 	}
 	defer resp.Body.Close()
 	data, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
@@ -655,6 +658,9 @@ func (b *Bot) createTicket(ctx context.Context, chat int64, text string) {
 	}
 	b.St.Audit(ctx, u.ID, u.ID, "support.ticket", "telegram", "")
 	b.send(chat, fmt.Sprintf("Обращение №%d отправлено. Ответим здесь же — в рабочие дни с 9:00 до 21:00, обычно в течение часа.\nЧтобы дополнить вопрос, ответьте (reply) на это сообщение.", id), b.mainMenu())
+	if b.OnSupport != nil {
+		b.OnSupport(ctx, id, fmt.Sprintf("Новое обращение #%d: %s", id, subj), u.Email+" (из Telegram): "+text)
+	}
 	if b.SupportChatID != 0 {
 		b.send(b.SupportChatID, fmt.Sprintf("Новое обращение #%d из Telegram от %s\n<b>%s</b>\n%s\n\nОтветьте на это сообщение (reply), чтобы ответить клиенту.",
 			id, escape(u.Email), escape(subj), escape(text)), nil)
@@ -695,6 +701,9 @@ func (b *Bot) clientReply(ctx context.Context, m *tgMessage) bool {
 	}
 	b.St.Audit(ctx, u.ID, u.ID, "support.message", fmt.Sprintf("ticket %d (telegram)", t.ID), "")
 	b.send(m.Chat.ID, fmt.Sprintf("Добавили в обращение №%d. Ответ придёт сюда же.", t.ID), nil)
+	if b.OnSupport != nil {
+		b.OnSupport(ctx, t.ID, fmt.Sprintf("Ответ клиента по обращению #%d", t.ID), u.Email+" (из Telegram): "+text)
+	}
 	if b.SupportChatID != 0 {
 		b.send(b.SupportChatID, fmt.Sprintf("Клиент ответил по обращению #%d (%s)\n<b>%s</b>\n%s\n\nОтветьте на это сообщение (reply), чтобы ответить клиенту.",
 			t.ID, escape(u.Email), escape(t.Subject), escape(text)), nil)

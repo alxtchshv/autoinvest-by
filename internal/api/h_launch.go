@@ -278,6 +278,76 @@ func (s *Server) adminLaunch(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"funnel": f, "mode": s.Cfg.LaunchMode})
 }
 
+// POST /admin/launch/announce {title, body, test, force} — новость о запуске всем из листа ожидания:
+// в кабинет, на почту и в Telegram (у кого подключён). test — только себе, проверить, как выглядит.
+func (s *Server) adminAnnounce(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Title string `json:"title"`
+		Body  string `json:"body"`
+		Test  bool   `json:"test"`
+		Force bool   `json:"force"`
+	}
+	if !readJSON(w, r, &in) {
+		return
+	}
+	in.Title, in.Body = strings.TrimSpace(in.Title), strings.TrimSpace(in.Body)
+	if l := len([]rune(in.Title)); l < 3 || l > 120 {
+		writeFieldErr(w, "title", "Заголовок от 3 до 120 символов")
+		return
+	}
+	if l := len([]rune(in.Body)); l < 10 || l > 2000 {
+		writeFieldErr(w, "body", "Текст от 10 до 2000 символов")
+		return
+	}
+	ctx := r.Context()
+	staff := currentUser(r)
+	var ids []int64
+	if in.Test {
+		ids = []int64{staff.ID}
+	} else {
+		if at := s.St.GetKV(ctx, "launch_announced_at"); at != "" && !in.Force {
+			writeJSON(w, http.StatusConflict, apiErr{Error: "Рассылка о запуске уже была " + at + ". Отправить ещё раз?", Code: "already_sent"})
+			return
+		}
+		rows, err := s.DB.QueryContext(ctx, `SELECT id FROM users WHERE role='user' AND status='active' AND waitlist_at IS NOT NULL ORDER BY waitlist_at`)
+		if err != nil {
+			s.internal(w, r, err)
+			return
+		}
+		for rows.Next() {
+			var id int64
+			if rows.Scan(&id) == nil {
+				ids = append(ids, id)
+			}
+		}
+		rows.Close()
+	}
+	var tg, mail int
+	for _, id := range ids {
+		if u, err := s.St.UserByID(ctx, id); err == nil {
+			if u.TelegramChatID != nil && u.NotifyTelegram && s.Bot != nil {
+				tg++
+			}
+			if u.NotifyEmail && s.N.Mailer().Enabled() {
+				mail++
+			}
+		}
+	}
+	msg := notify.Message{Kind: "welcome", Title: in.Title, Body: in.Body, Link: "/app", Email: true}
+	// по одному с паузой: Gmail и Telegram не любят сотни сообщений в одну секунду
+	go func(ids []int64) {
+		for _, id := range ids {
+			s.N.Send(context.Background(), id, msg)
+			time.Sleep(300 * time.Millisecond)
+		}
+	}(ids)
+	if !in.Test {
+		s.St.SetKV(ctx, "launch_announced_at", time.Now().Format("02.01.2006 15:04"))
+		s.St.Audit(ctx, staff.ID, staff.ID, "launch.announce", fmt.Sprintf("%d получателей", len(ids)), clientIP(r))
+	}
+	writeJSON(w, 200, map[string]any{"recipients": len(ids), "telegram": tg, "email": mail})
+}
+
 // POST /admin/users/{id}/bonus {days, reason} — подарить дни Pro к запуску за полезную идею или найденную ошибку.
 func (s *Server) adminBonus(w http.ResponseWriter, r *http.Request) {
 	var in struct {

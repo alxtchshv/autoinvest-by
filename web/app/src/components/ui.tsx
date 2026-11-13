@@ -363,13 +363,15 @@ export function MoreMenu({ items, label = "Ещё действия", text, icon 
 }
 
 /** Список вопросов с плавным раскрытием — один и тот же на сайте и в поддержке. */
+/** Частые вопросы: можно раскрыть сразу несколько — каждый открывается и закрывается сам по себе. */
 export function Accordion({ items, first = 0 }: { items: [string, ReactNode][]; first?: number | null }) {
-  const [open, setOpen] = useState<number | null>(first);
+  const [open, setOpen] = useState<Set<number>>(() => new Set(first === null ? [] : [first]));
+  const toggle = (k: number) => setOpen((o) => { const n = new Set(o); n.has(k) ? n.delete(k) : n.add(k); return n; });
   return (
     <div className="faq">
       {items.map(([q, a], k) => (
-        <div key={q} className={`faq-item ${open === k ? "open" : ""}`}>
-          <button type="button" className="faq-q" aria-expanded={open === k} onClick={() => setOpen(open === k ? null : k)}>
+        <div key={q} className={`faq-item ${open.has(k) ? "open" : ""}`}>
+          <button type="button" className="faq-q" aria-expanded={open.has(k)} onClick={() => toggle(k)}>
             {q}<span className="faq-ic" aria-hidden />
           </button>
           <div className="faq-a"><div><div className="faq-p">{a}</div></div></div>

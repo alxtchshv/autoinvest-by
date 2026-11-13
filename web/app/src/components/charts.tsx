@@ -67,6 +67,7 @@ export function PriceChart({ symbol, stable }: { symbol: string; stable?: boolea
   const [currency, setCurrency] = useState<"BYN" | "USD">("BYN");
   const [kind, setKind] = useState<"candles" | "line">(stable ? "line" : "candles");
   const [err, setErr] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
   const [legend, setLegend] = useState<Candle | null>(null);
   const [last, setLast] = useState<Candle | null>(null);
   const series = useRef<{ main?: ISeriesApi<"Candlestick"> | ISeriesApi<"Area">; vol?: ISeriesApi<"Histogram">; data: Candle[] }>({ data: [] });
@@ -76,10 +77,14 @@ export function PriceChart({ symbol, stable }: { symbol: string; stable?: boolea
     if (!chart) return;
     let cancelled = false;
     setErr(null);
+    setLoading(true);
     const lim = INTERVALS.find((i) => i.value === interval)!.limit;
     api.get<{ candles: Candle[] }>(`/market/candles?symbol=${symbol}&interval=${interval}&currency=${currency}&limit=${lim}`)
       .then(({ candles }) => {
         if (cancelled) return;
+        setLoading(false);
+        // биржа ничего не отдала за этот период — понятное сообщение вместо пустого поля (раньше тут падал график)
+        if (!candles?.length) { setErr("Нет данных за этот период — выберите другой интервал"); return; }
         if (series.current.main) chart.removeSeries(series.current.main);
         if (series.current.vol) chart.removeSeries(series.current.vol);
         series.current = { data: candles };
@@ -102,7 +107,7 @@ export function PriceChart({ symbol, stable }: { symbol: string; stable?: boolea
         chart.timeScale().fitContent();
         setLast(candles.at(-1) || null);
       })
-      .catch((e) => !cancelled && setErr(e.message));
+      .catch((e) => { if (!cancelled) { setLoading(false); setErr(e.message || "Не удалось загрузить график"); } });
     return () => {
       cancelled = true;
     };
@@ -164,6 +169,7 @@ export function PriceChart({ symbol, stable }: { symbol: string; stable?: boolea
         {shown && stable && <>{dateNum(shown.t)}: {price(shown.c, cur)} — официальный курс НБРБ, меняется раз в день</>}
       </div>
       <div ref={box} style={{ height: 380, position: "relative" }}>
+        {loading && !err && <div className="chart-loading" aria-live="polite"><span className="spinner" />Загружаем график…</div>}
         {err && <div className="notice error" style={{ position: "absolute", inset: "40% 10% auto", zIndex: 2 }}>{err}</div>}
       </div>
     </div>

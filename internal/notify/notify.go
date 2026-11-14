@@ -59,6 +59,7 @@ type Message struct {
 	Link  string // путь в приложении, например /app/plans/3
 	Email bool   // дублировать письмом
 	TG    string // свой текст для Telegram (HTML); пусто — заголовок и текст
+	TGKB  map[string]any // кнопки под сообщением в Telegram (inline_keyboard), если мессенджер их умеет
 	Mail  string // свой текст письма; пусто — Body
 }
 
@@ -92,7 +93,15 @@ func (n *Notifier) Send(ctx context.Context, userID int64, m Message) {
 			text += "\n\n<a href=\"" + n.publicURL + m.Link + "\">Открыть в AutoInvest →</a>"
 		}
 		go func(chat int64) {
-			if err := tg.Send(chat, text); err != nil {
+			var err error
+			if kbs, ok := tg.(interface {
+				SendKB(int64, string, map[string]any) error
+			}); ok && m.TGKB != nil {
+				err = kbs.SendKB(chat, text, m.TGKB)
+			} else {
+				err = tg.Send(chat, text)
+			}
+			if err != nil {
 				n.log.Warn("telegram send", "err", err)
 			}
 		}(*u.TelegramChatID)
@@ -126,14 +135,31 @@ func SupportReply(t *store.Ticket, answer string) Message {
 		tg += "\n<i>Ваш вопрос:</i>\n" + escapeHTML(question) + "\n"
 	}
 	tg += "\n<i>Ответ:</i>\n" + escapeHTML(cut(answer, 3000)) +
-		"\n\nЧтобы ответить, нажмите на это сообщение → «Ответить» и напишите текст — он попадёт в это же обращение."
+		"\n\nОстался вопрос — нажмите «Ответить» (или ответьте на это сообщение). Всё решилось — закройте обращение."
 	mail := fmt.Sprintf("Обращение №%d: %s\n\n", t.ID, t.Subject)
 	if question != "" {
 		mail += "Ваш вопрос:\n" + question + "\n\n"
 	}
 	mail += "Ответ поддержки:\n" + answer
 	return Message{Kind: "support", Title: fmt.Sprintf("Ответ поддержки по обращению №%d", t.ID), Body: cut(answer, 300),
-		Link: fmt.Sprintf("/app/support/%d", t.ID), Email: true, TG: tg, Mail: mail}
+		Link: fmt.Sprintf("/app/support/%d", t.ID), Email: true, TG: tg, Mail: mail, TGKB: supportKB(t.ID, true)}
+}
+
+// supportKB — кнопки под сообщением о обращении у клиента в боте.
+func supportKB(id int64, open bool) map[string]any {
+	first := []map[string]any{{"text": "✍️ Ответить", "callback_data": fmt.Sprintf("sr:%d", id)}}
+	if open {
+		first = append(first, map[string]any{"text": "✅ Закрыть обращение", "callback_data": fmt.Sprintf("tz:%d", id)})
+	}
+	return map[string]any{"inline_keyboard": [][]map[string]any{first, {{"text": "📋 Мои обращения", "callback_data": "sl"}}}}
+}
+
+// SupportClosed — поддержка закрыла обращение: человек узнаёт и может написать снова.
+func SupportClosed(t *store.Ticket) Message {
+	return Message{Kind: "support", Title: fmt.Sprintf("Обращение №%d закрыто", t.ID),
+		Body: "Тема: " + t.Subject + ". Если вопрос остался — напишите, и мы откроем обращение снова.",
+		Link: fmt.Sprintf("/app/support/%d", t.ID), TGKB: supportKB(t.ID, false),
+		TG: fmt.Sprintf("<b>Обращение №%d закрыто</b>\nТема: %s\n\nЕсли вопрос остался — нажмите «Ответить», и мы откроем его снова.", t.ID, escapeHTML(t.Subject))}
 }
 
 func cut(s string, n int) string {

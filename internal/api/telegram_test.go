@@ -142,17 +142,52 @@ func TestTelegramBotInSandbox(t *testing.T) {
 		t.Fatal("код входа или ссылка привязки попали в журнал")
 	}
 
-	// вопрос в поддержку одним сообщением → обращение на сайте
+	// поддержка в боте: тема (кнопки) → коротко → подробно → обращение; в группу — подробная карточка с кнопками
+	const group = -100777
+	bot.SupportChatID = group
+	press := func(msg int64, data string) {
+		t.Helper()
+		if code := c.do("POST", "/api/v1/telegram/sandbox/press", map[string]any{"message_id": msg, "data": data}, nil); code != 200 {
+			t.Fatalf("кнопка %s: %d", data, code)
+		}
+	}
 	c.do("POST", "/api/v1/telegram/sandbox/send", map[string]any{"text": "/support"}, nil)
-	waitBot(t, c, "Напишите вопрос")
-	c.do("POST", "/api/v1/telegram/sandbox/send", map[string]any{"text": "Когда придут деньги после вывода на карту?"}, nil)
+	sm := waitBot(t, c, "Поддержка AutoInvest")
+	press(sm.ID, "sn")
+	waitBot(t, c, "О чём вопрос")
+	press(sm.ID, "sc:withdraw")
+	waitBot(t, c, "Напишите тему")
+	c.do("POST", "/api/v1/telegram/sandbox/send", map[string]any{"text": "Когда придут деньги"}, nil)
+	waitBot(t, c, "опишите вопрос подробно")
+	c.do("POST", "/api/v1/telegram/sandbox/send", map[string]any{"text": "Вывел вчера на карту, а денег пока нет. Сколько обычно ждать?"}, nil)
 	waitBot(t, c, "отправлено")
 	var tickets struct{ Tickets []store.Ticket }
 	c.do("GET", "/api/v1/support/tickets", nil, &tickets)
-	if len(tickets.Tickets) != 1 || !strings.Contains(tickets.Tickets[0].Subject, "Когда придут деньги") {
+	if len(tickets.Tickets) != 1 || tickets.Tickets[0].Subject != "Когда придут деньги" || tickets.Tickets[0].Category != "withdraw" || tickets.Tickets[0].Source != "telegram" {
 		t.Fatalf("обращение: %+v", tickets.Tickets)
 	}
 	tid := tickets.Tickets[0].ID
+	groupMsg := func(want string) telegram.SandboxMsg {
+		t.Helper()
+		deadline := time.Now().Add(5 * time.Second)
+		for time.Now().Before(deadline) {
+			msgs, _ := tg.Messages(group, 0)
+			for i := len(msgs) - 1; i >= 0; i-- {
+				if strings.Contains(msgs[i].Text, want) {
+					return msgs[i]
+				}
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+		t.Fatalf("в группе нет «%s»", want)
+		return telegram.SandboxMsg{}
+	}
+	card := groupMsg(fmt.Sprintf("Новое обращение #%d", tid))
+	for _, want := range []string{"из Telegram", "Когда придут деньги", "Вывод денег", "tg@test.by", "Обращений всего: 1", "Сколько обычно ждать"} {
+		if !strings.Contains(card.Text, want) {
+			t.Fatalf("в карточке группы нет %q:\n%s", want, card.Text)
+		}
+	}
 
 	// ответ поддержки приходит подробно: номер, тема, вопрос, ответ
 	staff := newClient(t, srv.URL)
@@ -163,7 +198,7 @@ func TestTelegramBotInSandbox(t *testing.T) {
 		t.Fatalf("ответ поддержки: %d", code)
 	}
 	reply := waitBot(t, c, fmt.Sprintf("обращение №%d", tid))
-	for _, want := range []string{"Ваш вопрос", "Когда придут деньги после вывода", "Обычно в течение дня", "«Ответить»"} {
+	for _, want := range []string{"Ваш вопрос", "Сколько обычно ждать", "Обычно в течение дня", "«Ответить»"} {
 		if !strings.Contains(reply.Text, want) {
 			t.Fatalf("в ответе нет %q:\n%s", want, reply.Text)
 		}
@@ -181,5 +216,54 @@ func TestTelegramBotInSandbox(t *testing.T) {
 	last := full.Ticket.Messages[len(full.Ticket.Messages)-1]
 	if last.Body != "А если банк задержит?" || last.IsStaff || full.Ticket.Status != "open" {
 		t.Fatalf("сообщение клиента: %+v статус %s", last, full.Ticket.Status)
+	}
+	groupMsg(fmt.Sprintf("Клиент ответил по обращению #%d", tid))
+
+	// сотрудник в группе: «История клиента» и «Закрыть» (только с подключённым Telegram)
+	card = groupMsg(fmt.Sprintf("Клиент ответил по обращению #%d", tid))
+	const staffTG = 555000111
+	s.St.UpdateUserFields(context.Background(), su.ID, map[string]any{"telegram_chat_id": staffTG})
+	if !tg.StaffPress(group, card.ID, fmt.Sprintf("gh:%d", me2.ID), staffTG) {
+		t.Fatal("нет кнопки «История клиента»")
+	}
+	hist := groupMsg("История:")
+	for _, want := range []string{"Когда придут деньги", "Обычно в течение дня", "А если банк задержит?"} {
+		if !strings.Contains(hist.Text, want) {
+			t.Fatalf("в истории нет %q:\n%s", want, hist.Text)
+		}
+	}
+	if !tg.StaffPress(group, card.ID, fmt.Sprintf("gz:%d", tid), staffTG) {
+		t.Fatal("нет кнопки «Закрыть»")
+	}
+	groupMsg(fmt.Sprintf("Обращение #%d закрыто", tid))
+	closed := waitBot(t, c, fmt.Sprintf("Обращение №%d закрыто", tid))
+	c.do("GET", fmt.Sprintf("/api/v1/support/tickets/%d", tid), nil, &full)
+	if full.Ticket.Status != "closed" || full.Ticket.ClosedBy != "staff" {
+		t.Fatalf("после закрытия сотрудником: %s %s", full.Ticket.Status, full.Ticket.ClosedBy)
+	}
+	// клиент пишет снова кнопкой «Ответить» — обращение открывается
+	press(closed.ID, fmt.Sprintf("sr:%d", tid))
+	waitBot(t, c, fmt.Sprintf("Напишите сообщение по обращению №%d", tid))
+	c.do("POST", "/api/v1/telegram/sandbox/send", map[string]any{"text": "Деньги пришли, спасибо!"}, nil)
+	waitBot(t, c, "снова открыто")
+	// и сам закрывает его из «Мои обращения»
+	c.do("POST", "/api/v1/telegram/sandbox/send", map[string]any{"text": "/support"}, nil)
+	sm = waitBot(t, c, "Поддержка AutoInvest")
+	press(sm.ID, "sl")
+	waitBot(t, c, "Мои обращения")
+	press(sm.ID, fmt.Sprintf("st:%d", tid))
+	waitBot(t, c, "Деньги пришли, спасибо!")
+	press(sm.ID, fmt.Sprintf("tz:%d", tid))
+	waitBot(t, c, "закрыто. Спасибо")
+	groupMsg(fmt.Sprintf("Клиент закрыл обращение #%d", tid))
+	c.do("GET", fmt.Sprintf("/api/v1/support/tickets/%d", tid), nil, &full)
+	if full.Ticket.Status != "closed" || full.Ticket.ClosedBy != "client" {
+		t.Fatalf("после закрытия клиентом: %s %s", full.Ticket.Status, full.Ticket.ClosedBy)
+	}
+	// админка видит всю переписку клиента
+	var hs struct{ Tickets []store.Ticket }
+	staff.do("GET", fmt.Sprintf("/api/v1/admin/users/%d/support", me2.ID), nil, &hs)
+	if len(hs.Tickets) != 1 || len(hs.Tickets[0].Messages) != 4 {
+		t.Fatalf("история в админке: %+v", hs.Tickets)
 	}
 }

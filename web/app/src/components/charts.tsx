@@ -65,7 +65,12 @@ export function PriceChart({ symbol, stable }: { symbol: string; stable?: boolea
   const chart = useChart(box, 380);
   const [interval, setIntervalV] = useState<IntervalV>(stable ? "1d" : "1h");
   const [currency, setCurrency] = useState<"BYN" | "USD">("BYN");
-  const [kind, setKind] = useState<"candles" | "line">(stable ? "line" : "candles");
+  // по умолчанию линия — проще читать; свечи включаются кнопкой, выбор запоминается в этом браузере
+  const [kind, setKindV] = useState<"candles" | "line">(() => {
+    if (stable) return "line";
+    try { return localStorage.getItem("ai_chart_kind") === "candles" ? "candles" : "line"; } catch { return "line"; }
+  });
+  const setKind = (k: "candles" | "line") => { setKindV(k); try { localStorage.setItem("ai_chart_kind", k); } catch { /* */ } };
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [legend, setLegend] = useState<Candle | null>(null);
@@ -155,7 +160,7 @@ export function PriceChart({ symbol, stable }: { symbol: string; stable?: boolea
       <div className="row between wrap g12" style={{ marginBottom: 12 }}>
         <div className="row g8 wrap">
           {!stable && <Segmented label="Интервал" value={interval} onChange={setIntervalV} options={INTERVALS.map((i) => ({ value: i.value, label: i.label }))} />}
-          {!stable && <Segmented label="Вид графика" value={kind} onChange={setKind} options={[{ value: "candles", label: "Свечи" }, { value: "line", label: "Линия" }]} />}
+          {!stable && <Segmented label="Вид графика" value={kind} onChange={setKind} options={[{ value: "line", label: "Линия" }, { value: "candles", label: "Свечи" }]} />}
         </div>
         <Segmented label="Валюта" value={currency} onChange={setCurrency} options={[{ value: "BYN", label: RUB }, { value: "USD", label: "$" }]} />
       </div>

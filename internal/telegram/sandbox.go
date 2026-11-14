@@ -145,6 +145,32 @@ func (s *Sandbox) UserPress(chat, msgID int64, data, username string) bool {
 	return true
 }
 
+// StaffPress — сотрудник (fromID) нажал кнопку под сообщением бота в группе поддержки.
+func (s *Sandbox) StaffPress(group, msgID int64, data string, fromID int64) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	ok := false
+	for _, m := range s.chats[group] {
+		if m.ID == msgID && m.FromBot {
+			for _, row := range m.Buttons {
+				for _, b := range row {
+					ok = ok || (b.Data == data && data != "")
+				}
+			}
+		}
+	}
+	if !ok {
+		return false
+	}
+	s.updID++
+	upd, _ := json.Marshal(map[string]any{"update_id": s.updID, "callback_query": map[string]any{
+		"id": "cb" + itoa(s.updID), "data": data, "from": map[string]any{"id": fromID},
+		"message": map[string]any{"message_id": msgID, "chat": map[string]any{"id": group, "type": "group"}}}})
+	s.queue = append(s.queue, upd)
+	s.notify()
+	return true
+}
+
 // Keyboard — текущая нижняя клавиатура чата.
 func (s *Sandbox) Keyboard(chat int64) []SandboxButton {
 	s.mu.Lock()
@@ -268,6 +294,17 @@ func (s *Sandbox) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.notify()
 		s.mu.Unlock()
 		reply(map[string]any{"message_id": m.ID, "chat": map[string]any{"id": in.ChatID}, "text": in.Text})
+	case "editMessageReplyMarkup":
+		s.mu.Lock()
+		for _, m := range s.chats[in.ChatID] {
+			if m.ID == in.MessageID && m.FromBot {
+				s.rev++
+				m.Rev, m.Buttons = s.rev, parseKeyboard(in.ReplyMarkup)
+			}
+		}
+		s.notify()
+		s.mu.Unlock()
+		reply(map[string]any{"message_id": in.MessageID})
 	case "editMessageText":
 		s.mu.Lock()
 		for _, m := range s.chats[in.ChatID] {

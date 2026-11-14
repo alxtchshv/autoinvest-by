@@ -57,6 +57,7 @@ export type TicketMessage = { id: number; author_name: string; is_staff: boolean
 export type Ticket = {
   id: number; user_id: number; user_email?: string; user_name?: string; subject: string; category: string;
   status: "open" | "answered" | "closed"; created_at: number; updated_at: number; last_message: string; messages?: TicketMessage[];
+  source?: "web" | "telegram"; closed_by?: "client" | "staff" | "";
 };
 export type KYC = {
   user_id: number; user_email?: string; last_name: string; first_name: string; middle_name: string; birth_date: string;

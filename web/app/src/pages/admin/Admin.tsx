@@ -7,7 +7,7 @@ import { ago, byn, dateNum, dateTime, kop } from "../../lib/format";
 import { useLoad, useSubmit, useTitle } from "../../lib/hooks";
 import { useSession } from "../../lib/session";
 import type { Card, KYC, Order, Plan, Ticket, User } from "../../lib/types";
-import { Button, Empty, Field, Input, LoadError, Logo, Modal, Money, Notice, OrderStatus, PageLoader, PlanStatus, Segmented, useToast } from "../../components/ui";
+import { Accordion, Button, Empty, Field, Input, LoadError, Logo, Modal, Money, Notice, OrderStatus, PageLoader, PlanStatus, Segmented, useToast } from "../../components/ui";
 import { ModeBanner } from "../../components/layout";
 import { ChatView } from "../app/Support";
 
@@ -311,7 +311,7 @@ export function AdminUser() {
           </dl>
             {isAdmin && <div className="row g8 mt16"><Input style={{ width: 90, height: 34 }} value={days} onChange={(e) => setDays(e.target.value)} aria-label="Дней Pro" /><Button size="sm" onClick={() => act("pro", { days: Number(days) }, "Pro продлён")}>Выдать Pro (дней)</Button></div>}
           </div></section>
-          {d.tickets.length > 0 && <section className="sheet"><div className="sheet-head"><h2>Обращения</h2></div><div className="list">{d.tickets.map((t) => <Link key={t.id} to={`/admin/tickets/${t.id}`} className="list-row"><div className="grow"><div className="title">{t.subject}</div><div className="sub">{ago(t.updated_at)}</div></div><span className="badge">{t.status}</span></Link>)}</div></section>}
+          <UserSupport userId={u.id} />
         </div>
       </div>
     </div>
@@ -452,7 +452,7 @@ export function AdminTickets() {
           {data!.tickets.length === 0 ? <Empty title="Обращений нет" /> : (
             <div className="list">{data!.tickets.map((t) => (
               <Link key={t.id} to={`/admin/tickets/${t.id}`} className="list-row">
-                <div className="grow"><div className="title">#{t.id} {t.subject}</div><div className="sub">{t.user_email} · {data!.categories[t.category]} · {t.last_message}</div></div>
+                <div className="grow"><div className="title">#{t.id} {t.subject}</div><div className="sub">{t.user_email} · {data!.categories[t.category]} · {sourceLabel(t)} · {t.last_message}</div></div>
                 <div className="end stack g4" style={{ alignItems: "flex-end" }}>{t.status === "open" ? <span className="badge badge-warn">Ждёт ответа</span> : t.status === "answered" ? <span className="badge badge-brand">Отвечено</span> : <span className="badge">Закрыто</span>}<span className="tiny muted">{ago(t.updated_at)}</span></div>
               </Link>
             ))}</div>
@@ -463,32 +463,107 @@ export function AdminTickets() {
   );
 }
 
+const TICKET_CAT: Record<string, string> = {
+  payments: "Платежи и карты", plans: "Копилки и пополнения", withdraw: "Вывод денег", account: "Аккаунт и вход",
+  kyc: "Верификация", idea: "Идея по улучшению", bug: "Нашёл ошибку", other: "Другое",
+};
+
+/** Статус обращения по-русски: кто закрыл — тоже видно. */
+function TicketBadge({ t }: { t: Ticket }) {
+  if (t.status === "open") return <span className="badge badge-warn">Ждёт ответа</span>;
+  if (t.status === "answered") return <span className="badge badge-up">Отвечено</span>;
+  return <span className="badge">{t.closed_by === "client" ? "Закрыто клиентом" : t.closed_by === "staff" ? "Закрыто поддержкой" : "Закрыто"}</span>;
+}
+
+const sourceLabel = (t: Ticket) => (t.source === "telegram" ? "из Telegram" : "с сайта");
+
+/** Вся переписка клиента с поддержкой: каждое обращение раскрывается целиком, можно открыть несколько. */
+function SupportHistory({ tickets, exclude }: { tickets: Ticket[]; exclude?: number }) {
+  const list = tickets.filter((t) => t.id !== exclude);
+  if (!list.length) return <div className="sheet-body small muted">Других обращений нет.</div>;
+  return (
+    <div className="sheet-body faq-compact" style={{ paddingTop: 0, paddingBottom: 0 }}>
+      <Accordion first={null} items={list.map((t) => [
+        `#${t.id} · ${t.subject} · ${dateNum(t.created_at)} · ${sourceLabel(t)}`,
+        <div className="stack g8" key={t.id}>
+          <div className="row g8 wrap small muted"><TicketBadge t={t} /><span>{TICKET_CAT[t.category] || t.category}</span><Link to={`/admin/tickets/${t.id}`}>Открыть</Link></div>
+          <ChatView ticket={t} mineIsStaff />
+        </div>,
+      ])} />
+    </div>
+  );
+}
+
 export function AdminTicket() {
   const { id } = useParams();
-  const { data, error, loading, reload } = useLoad(() => api.get<{ ticket: Ticket; user: User }>(`/admin/tickets/${id}`), [id]);
+  const toast = useToast();
+  const { data, error, loading, reload } = useLoad(() => api.get<{ ticket: Ticket; user: User; history: Ticket[]; plans: number }>(`/admin/tickets/${id}`), [id]);
   const [body, setBody] = useState("");
   const s = useSubmit();
   useTitle(data ? `#${data.ticket.id}` : "Обращение");
   if (loading && !data) return <PageLoader />;
   if (error) return <LoadError error={error} retry={reload} />;
   const t = data!.ticket;
+  const u = data!.user;
+  const others = (data!.history || []).filter((x) => x.id !== t.id);
+  const setStatus = async (status: string) => {
+    try { await api.post(`/admin/tickets/${t.id}/status`, { status }); toast(status === "closed" ? "Обращение закрыто — клиенту отправлено уведомление" : "Обращение снова открыто"); reload(); } catch (e: any) { toast(e.message, "error"); }
+  };
   return (
     <div className="stack g16 admin-ticket">
       <div>
         <Link to="/admin/tickets" className="back"><ArrowLeft />Поддержка</Link>
         <div className="page-head" style={{ marginBottom: 0 }}>
-          <div><h1>#{t.id} {t.subject}</h1><p><Link to={`/admin/users/${t.user_id}`}>{data!.user.name} · {data!.user.email}</Link></p></div>
-          <Button size="sm" onClick={async () => { await api.post(`/admin/tickets/${t.id}/status`, { status: t.status === "closed" ? "open" : "closed" }); reload(); }}>{t.status === "closed" ? "Открыть снова" : "Закрыть"}</Button>
+          <div>
+            <h1>#{t.id} {t.subject}</h1>
+            <p className="row g8 wrap"><TicketBadge t={t} /><span>{TICKET_CAT[t.category] || t.category}</span><span>· {sourceLabel(t)}</span><span>· создано {dateTime(t.created_at)}</span></p>
+          </div>
+          <Button size="sm" variant={t.status === "closed" ? "secondary" : "primary"} onClick={() => setStatus(t.status === "closed" ? "open" : "closed")}>{t.status === "closed" ? "Открыть снова" : "Закрыть обращение"}</Button>
         </div>
       </div>
       {(t.category === "idea" || t.category === "bug") && <RewardBar userId={t.user_id} category={t.category} />}
-      <section className="sheet sheet-pad"><ChatView ticket={t} mineIsStaff /></section>
-      <form className="sheet sheet-pad stack g12" onSubmit={async (e) => { e.preventDefault(); try { await s.submit(() => api.post(`/admin/tickets/${t.id}/reply`, { body })); setBody(""); reload(); } catch { /* */ } }}>
-        <textarea className="textarea" placeholder="Ответ клиенту — придёт в приложение, на почту и в Telegram" value={body} onChange={(e) => setBody(e.target.value)} aria-label="Ответ" />
-        {s.error && <Notice kind="error">{s.error}</Notice>}
-        <div className="row" style={{ justifyContent: "flex-end" }}><Button type="submit" variant="primary" busy={s.busy} disabled={!body.trim()}>Ответить</Button></div>
-      </form>
+      <div className="home-grid">
+        <div className="stack g16">
+          <section className="sheet sheet-pad"><ChatView ticket={t} mineIsStaff /></section>
+          <form className="sheet sheet-pad stack g12" onSubmit={async (e) => { e.preventDefault(); try { await s.submit(() => api.post(`/admin/tickets/${t.id}/reply`, { body })); setBody(""); reload(); } catch { /* */ } }}>
+            <textarea className="textarea" placeholder="Ответ клиенту — придёт в кабинет, на почту и в Telegram (с кнопками «Ответить» и «Закрыть»)" value={body} onChange={(e) => setBody(e.target.value)} aria-label="Ответ" />
+            {s.error && <Notice kind="error">{s.error}</Notice>}
+            <div className="row" style={{ justifyContent: "flex-end" }}><Button type="submit" variant="primary" busy={s.busy} disabled={!body.trim()}>Ответить</Button></div>
+          </form>
+        </div>
+        <div className="stack g16">
+          <section className="sheet">
+            <div className="sheet-head"><h2>Клиент</h2><Link to={`/admin/users/${u.id}`} className="small">Карточка</Link></div>
+            <dl className="sheet-body kv">
+              <dt>Имя</dt><dd>{u.name}</dd>
+              <dt>Почта</dt><dd>{u.email}</dd>
+              {u.phone && <><dt>Телефон</dt><dd>{u.phone}</dd></>}
+              <dt>Telegram</dt><dd>{u.telegram_username ? `@${u.telegram_username}` : "не подключён"}</dd>
+              <dt>Тариф</dt><dd>{u.tier === "pro" ? "Pro" : "Старт"}</dd>
+              <dt>Копилок</dt><dd>{data!.plans}</dd>
+              <dt>Лист ожидания</dt><dd>{u.waitlist_at ? `с ${dateNum(u.waitlist_at)}` : "нет"}</dd>
+              <dt>Обращений</dt><dd>{(data!.history || []).length}</dd>
+            </dl>
+          </section>
+          <section className="sheet">
+            <div className="sheet-head"><h2>Вся переписка с клиентом</h2><span className="small muted">{others.length ? `ещё ${others.length}` : ""}</span></div>
+            <SupportHistory tickets={data!.history || []} exclude={t.id} />
+          </section>
+        </div>
+      </div>
     </div>
+  );
+}
+
+/** Карточка пользователя: вся его переписка с поддержкой. */
+function UserSupport({ userId }: { userId: number }) {
+  const { data } = useLoad(() => api.get<{ tickets: Ticket[] }>(`/admin/users/${userId}/support`), [userId]);
+  if (!data?.tickets.length) return null;
+  return (
+    <section className="sheet">
+      <div className="sheet-head"><h2>Переписка с поддержкой</h2><span className="small muted">{data.tickets.length} обращ.</span></div>
+      <SupportHistory tickets={data.tickets} />
+    </section>
   );
 }
 

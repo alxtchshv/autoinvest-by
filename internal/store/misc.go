@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 
 	"autoinvest/internal/market"
@@ -71,7 +72,25 @@ type Ticket struct {
 	CreatedAt   int64           `json:"created_at"`
 	UpdatedAt   int64           `json:"updated_at"`
 	LastMessage string          `json:"last_message"`
+	Source      string          `json:"source"`    // web | telegram
+	ClosedBy    string          `json:"closed_by"` // client | staff | ""
 	Messages    []TicketMessage `json:"messages,omitempty"`
+}
+
+// TicketCategories — темы обращений (сайт и бот показывают одинаковые) в порядке показа.
+var TicketCategories = []struct{ Key, Label string }{
+	{"payments", "Платежи и карты"}, {"plans", "Копилки и пополнения"}, {"withdraw", "Вывод денег"},
+	{"account", "Аккаунт и вход"}, {"kyc", "Верификация"}, {"idea", "Идея по улучшению"}, {"bug", "Нашёл ошибку"}, {"other", "Другое"},
+}
+
+// TicketCategoryLabel — название темы по ключу.
+func TicketCategoryLabel(key string) string {
+	for _, c := range TicketCategories {
+		if c.Key == key {
+			return c.Label
+		}
+	}
+	return "Другое"
 }
 
 type TicketMessage struct {
@@ -83,13 +102,18 @@ type TicketMessage struct {
 }
 
 func (s *Store) CreateTicket(ctx context.Context, userID int64, subject, category, body string) (int64, error) {
+	return s.CreateTicketVia(ctx, userID, subject, category, body, "web")
+}
+
+// CreateTicketVia — то же, с указанием, откуда пришло обращение (web | telegram).
+func (s *Store) CreateTicketVia(ctx context.Context, userID int64, subject, category, body, source string) (int64, error) {
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, err
 	}
 	defer tx.Rollback()
 	now := Now()
-	res, err := tx.ExecContext(ctx, `INSERT INTO tickets(user_id, subject, category, status, created_at, updated_at) VALUES(?,?,?,?,?,?)`, userID, subject, category, "open", now, now)
+	res, err := tx.ExecContext(ctx, `INSERT INTO tickets(user_id, subject, category, status, source, created_at, updated_at) VALUES(?,?,?,?,?,?,?)`, userID, subject, category, "open", source, now, now)
 	if err != nil {
 		return 0, err
 	}
@@ -114,24 +138,52 @@ func (s *Store) AddTicketMessage(ctx context.Context, ticketID, authorID int64, 
 	if staff {
 		status = "answered"
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE tickets SET status=?, updated_at=? WHERE id=?`, status, now, ticketID); err != nil {
+	// новое сообщение снова открывает обращение (даже закрытое) — сбрасываем «кто закрыл»
+	if _, err := tx.ExecContext(ctx, `UPDATE tickets SET status=?, closed_by='', updated_at=? WHERE id=?`, status, now, ticketID); err != nil {
 		return err
 	}
 	return tx.Commit()
 }
 
 func (s *Store) SetTicketStatus(ctx context.Context, id int64, status string) error {
-	_, err := s.DB.ExecContext(ctx, `UPDATE tickets SET status=?, updated_at=? WHERE id=?`, status, Now(), id)
+	_, err := s.DB.ExecContext(ctx, `UPDATE tickets SET status=?, closed_by='', updated_at=? WHERE id=?`, status, Now(), id)
 	return err
 }
 
+// CloseTicket — закрыть обращение; by: client | staff (видно в админке и в Telegram).
+func (s *Store) CloseTicket(ctx context.Context, id int64, by string) error {
+	_, err := s.DB.ExecContext(ctx, `UPDATE tickets SET status='closed', closed_by=?, updated_at=? WHERE id=?`, by, Now(), id)
+	return err
+}
+
+// SupportHistory — вся переписка человека с поддержкой: обращения со всеми сообщениями, новые сверху.
+func (s *Store) SupportHistory(ctx context.Context, userID int64, limit int) ([]Ticket, error) {
+	list, err := s.Tickets(ctx, userID, "", limit)
+	if err != nil {
+		return nil, err
+	}
+	sort.Slice(list, func(i, j int) bool { return list[i].CreatedAt > list[j].CreatedAt })
+	for i := range list {
+		if full, err := s.Ticket(ctx, userID, list[i].ID); err == nil {
+			list[i] = *full
+		}
+	}
+	return list, nil
+}
+
+// TicketCounts — сколько всего обращений у человека и сколько из них не закрыто.
+func (s *Store) TicketCounts(ctx context.Context, userID int64) (total, open int) {
+	s.DB.QueryRowContext(ctx, `SELECT COUNT(*), COALESCE(SUM(status!='closed'),0) FROM tickets WHERE user_id=?`, userID).Scan(&total, &open)
+	return
+}
+
 const ticketSelect = `SELECT t.id, t.user_id, u.email, u.name, t.subject, t.category, t.status, t.created_at, t.updated_at,
-	COALESCE((SELECT body FROM ticket_messages m WHERE m.ticket_id=t.id ORDER BY m.id DESC LIMIT 1), '')
+	COALESCE((SELECT body FROM ticket_messages m WHERE m.ticket_id=t.id ORDER BY m.id DESC LIMIT 1), ''), t.source, t.closed_by
 	FROM tickets t JOIN users u ON u.id=t.user_id`
 
 func scanTicket(r scanner) (*Ticket, error) {
 	var t Ticket
-	err := r.Scan(&t.ID, &t.UserID, &t.UserEmail, &t.UserName, &t.Subject, &t.Category, &t.Status, &t.CreatedAt, &t.UpdatedAt, &t.LastMessage)
+	err := r.Scan(&t.ID, &t.UserID, &t.UserEmail, &t.UserName, &t.Subject, &t.Category, &t.Status, &t.CreatedAt, &t.UpdatedAt, &t.LastMessage, &t.Source, &t.ClosedBy)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}

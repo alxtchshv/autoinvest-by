@@ -45,12 +45,21 @@ type Bot struct {
 	http      *http.Client
 
 	mu      sync.Mutex
-	waiting map[int64]time.Time // чаты, от которых ждём текст вопроса в поддержку
+	waiting map[int64]supportDraft // чаты, от которых ждём текст для поддержки (тема, вопрос или ответ)
+}
+
+// supportDraft — на каком шаге обращения человек: тема → вопрос, или ответ в существующее обращение.
+type supportDraft struct {
+	until  time.Time
+	stage  string // subject | body | reply
+	cat    string
+	subj   string
+	ticket int64
 }
 
 func New(token, username, publicURL string, st *store.Store, en *engine.Engine, log *slog.Logger) *Bot {
 	return &Bot{Token: token, Username: username, PublicURL: publicURL, API: "https://api.telegram.org", St: st, En: en, Log: log,
-		http: &http.Client{Timeout: 40 * time.Second}, waiting: map[int64]time.Time{}}
+		http: &http.Client{Timeout: 40 * time.Second}, waiting: map[int64]supportDraft{}}
 }
 
 // UseTransport направляет запросы бота в другой транспорт (тестовый Telegram).
@@ -218,6 +227,11 @@ func (b *Bot) Send(chatID int64, text string) error {
 	return b.send(chatID, text, nil)
 }
 
+// SendKB — сообщение с кнопками (уведомления: «Ответить», «Закрыть обращение»).
+func (b *Bot) SendKB(chatID int64, text string, markup map[string]any) error {
+	return b.send(chatID, text, markup)
+}
+
 func (b *Bot) send(chatID int64, text string, markup map[string]any) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
@@ -356,6 +370,9 @@ func (b *Bot) Handle(ctx context.Context, u update) {
 	}()
 	b.logIn(ctx, u)
 	switch {
+	case u.Callback != nil && u.Callback.Message != nil && b.SupportChatID != 0 && u.Callback.Message.Chat.ID == b.SupportChatID:
+		b.call(ctx, "answerCallbackQuery", map[string]any{"callback_query_id": u.Callback.ID}, nil)
+		b.staffPress(ctx, u.Callback.From.ID, u.Callback.Message.Chat.ID, u.Callback.Message.MessageID, u.Callback.Data)
 	case u.Callback != nil && u.Callback.Message != nil:
 		b.call(ctx, "answerCallbackQuery", map[string]any{"callback_query_id": u.Callback.ID}, nil)
 		b.press(ctx, u.Callback.Message.Chat.ID, u.Callback.Message.MessageID, u.Callback.Data)
@@ -385,8 +402,8 @@ func (b *Bot) handle(ctx context.Context, chat int64, username, text string) {
 	cmd, arg, _ := strings.Cut(text, " ")
 	cmd = strings.ToLower(strings.Split(cmd, "@")[0])
 	if !strings.HasPrefix(cmd, "/") {
-		if b.takeWaiting(chat) {
-			b.createTicket(ctx, chat, text)
+		if d, ok := b.takeWaiting(chat); ok {
+			b.supportText(ctx, chat, d, text)
 			return
 		}
 		cmd = "/menu"
@@ -493,6 +510,28 @@ func (b *Bot) press(ctx context.Context, chat, msg int64, data string) {
 	case "sx":
 		b.takeWaiting(chat)
 		b.edit(chat, msg, "Хорошо, не отправляем. Что посмотрим?", b.mainMenu())
+	case "sn":
+		b.edit(chat, msg, "<b>Новое обращение</b>\nО чём вопрос?", b.categoryMenu())
+	case "sc":
+		label := store.TicketCategoryLabel(arg)
+		b.setWaiting(chat, supportDraft{stage: "subject", cat: arg})
+		b.edit(chat, msg, "<b>"+escape(label)+"</b>\nНапишите тему коротко, одной строкой — например: «Не проходит пополнение».", kb(row(cb("Отмена", "sx"))))
+	case "sl":
+		t, m := b.ticketsView(ctx, u)
+		b.edit(chat, msg, t, m)
+	case "st":
+		t, m := b.ticketView(ctx, u, id)
+		b.edit(chat, msg, t, m)
+	case "sr":
+		t, err := b.St.Ticket(ctx, u.ID, id)
+		if err != nil {
+			b.send(chat, "Обращение не найдено.", nil)
+			return
+		}
+		b.setWaiting(chat, supportDraft{stage: "reply", ticket: t.ID})
+		b.send(chat, fmt.Sprintf("Напишите сообщение по обращению №%d («%s») — передадим в поддержку.", t.ID, escape(t.Subject)), kb(row(cb("Отмена", "sx"))))
+	case "tz":
+		b.clientClose(ctx, u, id)
 	default:
 		b.edit(chat, msg, "Что посмотрим?", b.mainMenu())
 	}
@@ -609,62 +648,338 @@ func (b *Bot) historyText(ctx context.Context, u *store.User) string {
 }
 
 // ---------------------------------------------------------------- поддержка
+//
+// Человек: «Написать в поддержку» → тема (кнопки) → коротко, одной строкой → подробно → обращение №N.
+// «Мои обращения» — список со статусами, внутри — переписка, «Ответить» и «Закрыть».
+// Сотрудники в группе поддержки: подробная карточка клиента, ответ — reply на карточку, кнопки «История клиента» и «Закрыть».
+
+func (b *Bot) setWaiting(chat int64, d supportDraft) {
+	d.until = time.Now().Add(20 * time.Minute)
+	b.mu.Lock()
+	b.waiting[chat] = d
+	b.mu.Unlock()
+}
+
+func (b *Bot) takeWaiting(chat int64) (supportDraft, bool) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	d, ok := b.waiting[chat]
+	delete(b.waiting, chat)
+	return d, ok && time.Now().Before(d.until)
+}
 
 func (b *Bot) askSupport(chat, msg int64) {
-	b.mu.Lock()
-	b.waiting[chat] = time.Now().Add(15 * time.Minute)
-	b.mu.Unlock()
-	text := "Напишите вопрос одним сообщением — передадим в поддержку. Ответ придёт сюда и на почту."
+	text := "<b>Поддержка AutoInvest</b>\nОтвечаем здесь и на почту — в рабочие дни с 9:00 до 21:00, обычно в течение часа."
+	m := kb(row(cb("✍️ Новое обращение", "sn")), row(cb("📋 Мои обращения", "sl")), row(cb("Меню", "m")))
 	if msg != 0 {
-		b.edit(chat, msg, text, kb(row(cb("Отмена", "sx"))))
+		b.edit(chat, msg, text, m)
 	} else {
-		b.send(chat, text, kb(row(cb("Отмена", "sx"))))
+		b.send(chat, text, m)
 	}
 }
 
-func (b *Bot) takeWaiting(chat int64) bool {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	t, ok := b.waiting[chat]
-	delete(b.waiting, chat)
-	return ok && time.Now().Before(t)
+func (b *Bot) categoryMenu() map[string]any {
+	var rows [][]btn
+	for i := 0; i < len(store.TicketCategories); i += 2 {
+		r := row(cb(store.TicketCategories[i].Label, "sc:"+store.TicketCategories[i].Key))
+		if i+1 < len(store.TicketCategories) {
+			r = append(r, cb(store.TicketCategories[i+1].Label, "sc:"+store.TicketCategories[i+1].Key))
+		}
+		rows = append(rows, r)
+	}
+	rows = append(rows, row(cb("Отмена", "sx")))
+	return kb(rows...)
 }
 
-func (b *Bot) createTicket(ctx context.Context, chat int64, text string) {
+// supportText — текст от человека на одном из шагов обращения.
+func (b *Bot) supportText(ctx context.Context, chat int64, d supportDraft, text string) {
 	u, ok := b.user(ctx, chat)
 	if !ok {
 		return
 	}
-	if len([]rune(text)) < 10 {
-		b.mu.Lock()
-		b.waiting[chat] = time.Now().Add(15 * time.Minute)
-		b.mu.Unlock()
-		b.send(chat, "Опишите вопрос чуть подробнее — хотя бы одним предложением.", kb(row(cb("Отмена", "sx"))))
+	cancel := kb(row(cb("Отмена", "sx")))
+	switch d.stage {
+	case "subject":
+		subj := strings.Join(strings.Fields(text), " ")
+		if n := len([]rune(subj)); n < 3 || n > 80 {
+			b.setWaiting(chat, d)
+			b.send(chat, "Тема — от 3 до 80 символов, одной строкой. Подробности напишете следующим сообщением.", cancel)
+			return
+		}
+		d.subj, d.stage = subj, "body"
+		b.setWaiting(chat, d)
+		b.send(chat, "<b>Тема:</b> "+escape(subj)+"\nТеперь опишите вопрос подробно: что делали, что ожидали, что получилось. Можно одним сообщением.", cancel)
+	case "body", "":
+		if len([]rune(strings.TrimSpace(text))) < 10 {
+			b.setWaiting(chat, d)
+			b.send(chat, "Опишите вопрос чуть подробнее — хотя бы одним предложением.", cancel)
+			return
+		}
+		if r := []rune(text); len(r) > 4000 {
+			text = string(r[:4000])
+		}
+		if d.subj == "" { // старый путь: сразу текст — тема из первых слов
+			d.subj = strings.Join(strings.Fields(text), " ")
+			if r := []rune(d.subj); len(r) > 60 {
+				d.subj = string(r[:60]) + "…"
+			}
+		}
+		if d.cat == "" {
+			d.cat = "other"
+		}
+		id, err := b.St.CreateTicketVia(ctx, u.ID, d.subj, d.cat, text, "telegram")
+		if err != nil {
+			b.Log.Error("telegram: обращение", "err", err)
+			b.send(chat, "Не получилось создать обращение. Напишите на сайте: "+b.site("/app/support"), nil)
+			return
+		}
+		b.St.Audit(ctx, u.ID, u.ID, "support.ticket", "telegram", "")
+		b.send(chat, fmt.Sprintf("Обращение №%d отправлено.\n<b>Тема:</b> %s\n<b>Категория:</b> %s\n\nОтветим здесь же и на почту — в рабочие дни с 9:00 до 21:00, обычно в течение часа.",
+			id, escape(d.subj), escape(store.TicketCategoryLabel(d.cat))),
+			kb(row(cb("✍️ Дополнить", fmt.Sprintf("sr:%d", id)), cb("✅ Закрыть", fmt.Sprintf("tz:%d", id))), row(cb("📋 Мои обращения", "sl"), cb("Меню", "m"))))
+		if b.OnSupport != nil {
+			b.OnSupport(ctx, id, fmt.Sprintf("Новое обращение #%d: %s", id, d.subj), u.Email+" (из Telegram): "+text)
+		}
+		b.SupportAlert(ctx, id, "new", text, "")
+	case "reply":
+		t, err := b.St.Ticket(ctx, u.ID, d.ticket)
+		if err != nil {
+			b.send(chat, "Обращение не найдено.", nil)
+			return
+		}
+		b.addClientMessage(ctx, chat, u, t, text)
+	}
+}
+
+// addClientMessage — сообщение клиента в существующее обращение (кнопкой «Ответить» или reply).
+func (b *Bot) addClientMessage(ctx context.Context, chat int64, u *store.User, t *store.Ticket, text string) {
+	text = strings.TrimSpace(text)
+	if r := []rune(text); len(r) > 4000 {
+		text = string(r[:4000])
+	}
+	wasClosed := t.Status == "closed"
+	if err := b.St.AddTicketMessage(ctx, t.ID, u.ID, false, text); err != nil {
+		b.send(chat, "Не получилось добавить сообщение, попробуйте позже.", nil)
 		return
 	}
-	if len([]rune(text)) > 4000 {
-		text = string([]rune(text)[:4000])
+	b.St.Audit(ctx, u.ID, u.ID, "support.message", fmt.Sprintf("ticket %d (telegram)", t.ID), "")
+	note := fmt.Sprintf("Добавили в обращение №%d. Ответ придёт сюда же.", t.ID)
+	if wasClosed {
+		note = fmt.Sprintf("Обращение №%d снова открыто — передали сообщение в поддержку.", t.ID)
 	}
-	subject := strings.Fields(text)
-	subj := strings.Join(subject, " ")
-	if r := []rune(subj); len(r) > 60 {
-		subj = string(r[:60]) + "…"
-	}
-	id, err := b.St.CreateTicket(ctx, u.ID, subj, "other", text)
-	if err != nil {
-		b.Log.Error("telegram: обращение", "err", err)
-		b.send(chat, "Не получилось создать обращение. Напишите на сайте: "+b.site("/app/support"), nil)
-		return
-	}
-	b.St.Audit(ctx, u.ID, u.ID, "support.ticket", "telegram", "")
-	b.send(chat, fmt.Sprintf("Обращение №%d отправлено. Ответим здесь же — в рабочие дни с 9:00 до 21:00, обычно в течение часа.\nЧтобы дополнить вопрос, ответьте (reply) на это сообщение.", id), b.mainMenu())
+	b.send(chat, note, kb(row(cb("📋 Мои обращения", "sl"), cb("Меню", "m"))))
 	if b.OnSupport != nil {
-		b.OnSupport(ctx, id, fmt.Sprintf("Новое обращение #%d: %s", id, subj), u.Email+" (из Telegram): "+text)
+		b.OnSupport(ctx, t.ID, fmt.Sprintf("Ответ клиента по обращению #%d", t.ID), u.Email+" (из Telegram): "+text)
 	}
-	if b.SupportChatID != 0 {
-		b.send(b.SupportChatID, fmt.Sprintf("Новое обращение #%d из Telegram от %s\n<b>%s</b>\n%s\n\nОтветьте на это сообщение (reply), чтобы ответить клиенту.",
-			id, escape(u.Email), escape(subj), escape(text)), nil)
+	b.SupportAlert(ctx, t.ID, "reply", text, "")
+}
+
+// clientClose — человек сам закрыл обращение кнопкой в боте.
+func (b *Bot) clientClose(ctx context.Context, u *store.User, id int64) {
+	t, err := b.St.Ticket(ctx, u.ID, id)
+	if err != nil || u.TelegramChatID == nil {
+		return
 	}
+	chat := *u.TelegramChatID
+	if t.Status == "closed" {
+		b.send(chat, fmt.Sprintf("Обращение №%d уже закрыто.", t.ID), kb(row(cb("📋 Мои обращения", "sl"), cb("Меню", "m"))))
+		return
+	}
+	b.St.CloseTicket(ctx, t.ID, "client")
+	b.St.Audit(ctx, u.ID, u.ID, "support.closed", fmt.Sprintf("ticket %d (telegram)", t.ID), "")
+	b.send(chat, fmt.Sprintf("Обращение №%d закрыто. Спасибо! Если вопрос вернётся — нажмите «Ответить», и мы откроем его снова.", t.ID),
+		kb(row(cb("✍️ Ответить", fmt.Sprintf("sr:%d", t.ID)), cb("📋 Мои обращения", "sl")), row(cb("Меню", "m"))))
+	if b.OnSupport != nil {
+		b.OnSupport(ctx, t.ID, fmt.Sprintf("Клиент закрыл обращение #%d", t.ID), u.Email+": "+t.Subject)
+	}
+	b.SupportAlert(ctx, t.ID, "closed_client", "", "")
+}
+
+var ticketStatusLabel = map[string]string{"open": "🟡 ждёт ответа", "answered": "🟢 есть ответ", "closed": "⚪️ закрыто"}
+
+func (b *Bot) ticketsView(ctx context.Context, u *store.User) (string, map[string]any) {
+	list, _ := b.St.Tickets(ctx, u.ID, "", 8)
+	if len(list) == 0 {
+		return "<b>Мои обращения</b>\nПока ни одного. Если что-то непонятно или не работает — напишите, ответим.",
+			kb(row(cb("✍️ Новое обращение", "sn")), row(cb("Меню", "m")))
+	}
+	var sb strings.Builder
+	sb.WriteString("<b>Мои обращения</b>\n")
+	var rows [][]btn
+	for _, t := range list {
+		fmt.Fprintf(&sb, "\n№%d · %s — %s", t.ID, escape(t.Subject), ticketStatusLabel[t.Status])
+		title := fmt.Sprintf("№%d · %s", t.ID, t.Subject)
+		if r := []rune(title); len(r) > 40 {
+			title = string(r[:40]) + "…"
+		}
+		rows = append(rows, row(cb(title, fmt.Sprintf("st:%d", t.ID))))
+	}
+	rows = append(rows, row(cb("✍️ Новое обращение", "sn"), cb("Меню", "m")))
+	return sb.String(), kb(rows...)
+}
+
+func (b *Bot) ticketView(ctx context.Context, u *store.User, id int64) (string, map[string]any) {
+	t, err := b.St.Ticket(ctx, u.ID, id)
+	if err != nil {
+		return "Обращение не найдено.", kb(row(cb("📋 Мои обращения", "sl")))
+	}
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "<b>Обращение №%d</b> — %s\n<b>Тема:</b> %s\n<b>Категория:</b> %s\n",
+		t.ID, ticketStatusLabel[t.Status], escape(t.Subject), escape(store.TicketCategoryLabel(t.Category)))
+	msgs := t.Messages
+	if len(msgs) > 6 {
+		fmt.Fprintf(&sb, "\n<i>…ещё %d сообщ. раньше — вся переписка на сайте</i>\n", len(msgs)-6)
+		msgs = msgs[len(msgs)-6:]
+	}
+	for _, m := range msgs {
+		who := "Вы"
+		if m.IsStaff {
+			who = "Поддержка"
+		}
+		body := m.Body
+		if r := []rune(body); len(r) > 400 {
+			body = string(r[:400]) + "…"
+		}
+		fmt.Fprintf(&sb, "\n<b>%s</b> · %s\n%s\n", who, time.Unix(m.CreatedAt, 0).In(engine.Minsk).Format("02.01 15:04"), escape(body))
+	}
+	first := row(cb("✍️ Ответить", fmt.Sprintf("sr:%d", t.ID)))
+	if t.Status != "closed" {
+		first = append(first, cb("✅ Закрыть", fmt.Sprintf("tz:%d", t.ID)))
+	}
+	return sb.String(), kb(first, row(cb("📋 Мои обращения", "sl"), cb("Меню", "m")))
+}
+
+// SupportAlert — карточка для группы поддержки: что случилось, тема, клиент и его история, кнопки.
+// event: new | reply | closed_client | closed_staff; staffName — кто закрыл (для closed_staff).
+func (b *Bot) SupportAlert(ctx context.Context, ticketID int64, event, text, staffName string) {
+	if b.SupportChatID == 0 || b.St == nil {
+		return
+	}
+	t, err := b.St.Ticket(ctx, 0, ticketID)
+	if err != nil {
+		return
+	}
+	u, err := b.St.UserByID(ctx, t.UserID)
+	if err != nil {
+		return
+	}
+	src := "с сайта"
+	if t.Source == "telegram" {
+		src = "из Telegram"
+	}
+	var sb strings.Builder
+	switch event {
+	case "new":
+		fmt.Fprintf(&sb, "🆕 <b>Новое обращение #%d</b> · %s\n", t.ID, src)
+	case "reply":
+		fmt.Fprintf(&sb, "💬 <b>Клиент ответил по обращению #%d</b>\n", t.ID)
+	case "closed_client":
+		fmt.Fprintf(&sb, "✅ <b>Клиент закрыл обращение #%d</b>\n", t.ID)
+	case "closed_staff":
+		fmt.Fprintf(&sb, "✅ <b>Обращение #%d закрыто</b> · %s\n", t.ID, escape(staffName))
+	}
+	fmt.Fprintf(&sb, "<b>Тема:</b> %s\n<b>Категория:</b> %s\n", escape(t.Subject), escape(store.TicketCategoryLabel(t.Category)))
+	if event == "new" || event == "reply" {
+		who := escape(u.Name) + " · " + escape(u.Email)
+		if u.Phone != "" && u.PhoneVerified {
+			who += " · " + escape(u.Phone)
+		}
+		if u.TelegramUsername != "" {
+			who += " · @" + escape(u.TelegramUsername)
+		}
+		tier := "Старт"
+		if u.IsPro() {
+			tier = "Pro"
+		}
+		plans, _ := b.St.CountOpenPlans(ctx, u.ID)
+		total, open := b.St.TicketCounts(ctx, u.ID)
+		fmt.Fprintf(&sb, "<b>Клиент:</b> %s\nID %d · тариф %s · копилок %d", who, u.ID, tier, plans)
+		if u.WaitlistAt != nil {
+			sb.WriteString(" · в листе ожидания")
+		}
+		fmt.Fprintf(&sb, "\nОбращений всего: %d, не закрыто: %d\n", total, open)
+		if r := []rune(text); len(r) > 2500 {
+			text = string(r[:2500]) + "…"
+		}
+		fmt.Fprintf(&sb, "\n<b>Сообщение:</b>\n%s\n\nЧтобы ответить клиенту, ответьте (reply) на это сообщение.", escape(text))
+	}
+	rows := [][]btn{row(cb("📜 История клиента", fmt.Sprintf("gh:%d", u.ID)))}
+	if t.Status != "closed" {
+		rows[0] = append(rows[0], cb("✅ Закрыть", fmt.Sprintf("gz:%d", t.ID)))
+	}
+	rows = append(rows, b.siteBtn("Открыть в админке", fmt.Sprintf("/admin/tickets/%d", t.ID)))
+	if err := b.send(b.SupportChatID, sb.String(), kb(rowsOf(rows...)...)); err != nil {
+		b.Log.Warn("поддержка: не ушло в группу Telegram", "ticket", t.ID, "err", err)
+	}
+}
+
+// staffPress — кнопки под карточками в группе поддержки (только для сотрудников с подключённым Telegram).
+func (b *Bot) staffPress(ctx context.Context, fromID, chat, msg int64, data string) {
+	staff, err := b.St.UserByTelegram(ctx, fromID)
+	if err != nil || !staff.IsStaff() {
+		b.send(chat, "Кнопки работают только у сотрудников, подключивших Telegram в профиле AutoInvest.", nil)
+		return
+	}
+	cmd, arg, _ := strings.Cut(data, ":")
+	id, _ := strconv.ParseInt(arg, 10, 64)
+	switch cmd {
+	case "gh":
+		b.send(chat, b.historyForStaff(ctx, id), kb(rowsOf(b.siteBtn("Вся переписка в админке", fmt.Sprintf("/admin/users/%d", id)))...))
+	case "gz":
+		t, err := b.St.Ticket(ctx, 0, id)
+		if err != nil {
+			return
+		}
+		if t.Status == "closed" {
+			b.send(chat, fmt.Sprintf("Обращение #%d уже закрыто.", t.ID), nil)
+			return
+		}
+		b.St.CloseTicket(ctx, t.ID, "staff")
+		b.St.Audit(ctx, t.UserID, staff.ID, "support.closed", fmt.Sprintf("ticket %d (telegram)", t.ID), "")
+		// под карточкой оставляем только «История клиента»
+		b.call(ctx, "editMessageReplyMarkup", map[string]any{"chat_id": chat, "message_id": msg,
+			"reply_markup": kb(row(cb("📜 История клиента", fmt.Sprintf("gh:%d", t.UserID))))}, nil)
+		if b.En != nil && b.En.N != nil {
+			b.En.N.Send(ctx, t.UserID, notify.SupportClosed(t))
+		}
+		b.SupportAlert(ctx, t.ID, "closed_staff", "", staff.Name)
+	}
+}
+
+// historyForStaff — вся переписка клиента с поддержкой одним сообщением (новые обращения сверху).
+func (b *Bot) historyForStaff(ctx context.Context, userID int64) string {
+	u, err := b.St.UserByID(ctx, userID)
+	if err != nil {
+		return "Клиент не найден."
+	}
+	list, _ := b.St.SupportHistory(ctx, userID, 20)
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "📜 <b>История: %s</b> · %s · ID %d\n", escape(u.Name), escape(u.Email), u.ID)
+	if len(list) == 0 {
+		sb.WriteString("\nОбращений нет.")
+		return sb.String()
+	}
+	for _, t := range list {
+		block := fmt.Sprintf("\n<b>#%d · %s</b> — %s, %s\n", t.ID, escape(t.Subject), ticketStatusLabel[t.Status],
+			time.Unix(t.CreatedAt, 0).In(engine.Minsk).Format("02.01.2006"))
+		for _, m := range t.Messages {
+			who := "Клиент"
+			if m.IsStaff {
+				who = "Поддержка"
+			}
+			body := m.Body
+			if r := []rune(body); len(r) > 300 {
+				body = string(r[:300]) + "…"
+			}
+			block += fmt.Sprintf("• <i>%s, %s:</i> %s\n", who, time.Unix(m.CreatedAt, 0).In(engine.Minsk).Format("02.01 15:04"), escape(body))
+		}
+		if sb.Len()+len(block) > 3700 { // лимит сообщения Telegram — 4096
+			sb.WriteString("\n…остальное — в админке.")
+			break
+		}
+		sb.WriteString(block)
+	}
+	return sb.String()
 }
 
 var (
@@ -691,23 +1006,7 @@ func (b *Bot) clientReply(ctx context.Context, m *tgMessage) bool {
 		b.send(m.Chat.ID, fmt.Sprintf("Обращение №%d не найдено.", id), nil)
 		return true
 	}
-	text := strings.TrimSpace(m.Text)
-	if r := []rune(text); len(r) > 4000 {
-		text = string(r[:4000])
-	}
-	if err := b.St.AddTicketMessage(ctx, t.ID, u.ID, false, text); err != nil {
-		b.send(m.Chat.ID, "Не получилось добавить сообщение, попробуйте позже.", nil)
-		return true
-	}
-	b.St.Audit(ctx, u.ID, u.ID, "support.message", fmt.Sprintf("ticket %d (telegram)", t.ID), "")
-	b.send(m.Chat.ID, fmt.Sprintf("Добавили в обращение №%d. Ответ придёт сюда же.", t.ID), nil)
-	if b.OnSupport != nil {
-		b.OnSupport(ctx, t.ID, fmt.Sprintf("Ответ клиента по обращению #%d", t.ID), u.Email+" (из Telegram): "+text)
-	}
-	if b.SupportChatID != 0 {
-		b.send(b.SupportChatID, fmt.Sprintf("Клиент ответил по обращению #%d (%s)\n<b>%s</b>\n%s\n\nОтветьте на это сообщение (reply), чтобы ответить клиенту.",
-			t.ID, escape(u.Email), escape(t.Subject), escape(text)), nil)
-	}
+	b.addClientMessage(ctx, m.Chat.ID, u, t, m.Text)
 	return true
 }
 

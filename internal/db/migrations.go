@@ -358,4 +358,7 @@ CREATE TABLE visits (
 `,
 	// причина блокировки — человек видит её при попытке входа
 	`ALTER TABLE users ADD COLUMN block_reason TEXT NOT NULL DEFAULT '';`,
+	// откуда пришло обращение (сайт или Telegram) и кто закрыл — для поддержки
+	`ALTER TABLE tickets ADD COLUMN source TEXT NOT NULL DEFAULT 'web';
+ALTER TABLE tickets ADD COLUMN closed_by TEXT NOT NULL DEFAULT '';`,
 }

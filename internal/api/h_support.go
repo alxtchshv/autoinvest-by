@@ -3,7 +3,6 @@ package api
 import (
 	"context"
 	"fmt"
-	"html"
 	"net/http"
 	"strconv"
 	"strings"
@@ -33,11 +32,13 @@ func (s *Server) readNotifications(w http.ResponseWriter, r *http.Request) {
 	s.listNotifications(w, r)
 }
 
-var ticketCategories = map[string]string{
-	"idea": "Идея по улучшению", "bug": "Нашёл ошибку",
-	"payments": "Платежи и карты", "plans": "Копилки и пополнения", "withdraw": "Вывод денег",
-	"account": "Аккаунт и вход", "kyc": "Верификация", "other": "Другое",
-}
+var ticketCategories = func() map[string]string {
+	m := map[string]string{}
+	for _, c := range store.TicketCategories {
+		m[c.Key] = c.Label
+	}
+	return m
+}()
 
 // supportUser — обращения всегда от основного аккаунта: с демо-счёта пишет тот же человек.
 func (s *Server) supportUser(r *http.Request) *store.User {
@@ -90,8 +91,7 @@ func (s *Server) createTicket(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, r, err)
 		return
 	}
-	s.alertSupport(r.Context(), id, fmt.Sprintf("Новое обращение #%d: %s", id, in.Subject), u.Email+": "+truncate(in.Body, 160),
-		fmt.Sprintf("Новое обращение #%d от %s\n<b>%s</b>\n%s\n\nОтветьте на это сообщение (reply), чтобы ответить клиенту.", id, html.EscapeString(u.Email), html.EscapeString(in.Subject), html.EscapeString(truncate(in.Body, 500))))
+	s.alertSupport(r.Context(), id, "new", fmt.Sprintf("Новое обращение #%d: %s", id, in.Subject), u.Email+": "+truncate(in.Body, 160), in.Body)
 	t, _ := s.St.Ticket(r.Context(), u.ID, id)
 	writeJSON(w, http.StatusCreated, map[string]any{"ticket": t})
 }
@@ -104,17 +104,23 @@ func truncate(s string, n int) string {
 	return s
 }
 
-// alertSupport — новое обращение или ответ клиента: в группу поддержки в Telegram и в колокольчик
-// всем сотрудникам (админ и поддержка) — со ссылкой на обращение в админке.
-func (s *Server) alertSupport(ctx context.Context, ticketID int64, title, body, tgText string) {
-	if s.Bot != nil && s.Cfg.SupportChatID != 0 {
-		go func() {
-			if err := s.Bot.Send(s.Cfg.SupportChatID, tgText); err != nil {
-				s.Log.Warn("поддержка: не ушло в группу Telegram", "ticket", ticketID, "err", err)
-			}
-		}()
+// alertSupport — событие по обращению: подробная карточка в группу поддержки в Telegram (тема, клиент, история, кнопки)
+// и уведомление в колокольчик всем сотрудникам (админ и поддержка) со ссылкой на обращение в админке.
+func (s *Server) alertSupport(ctx context.Context, ticketID int64, event, title, short, full string) {
+	if s.Bot != nil {
+		go s.Bot.SupportAlert(context.Background(), ticketID, event, full, "")
 	}
-	s.NotifyStaff(ctx, ticketID, title, body)
+	s.NotifyStaff(ctx, ticketID, title, short)
+}
+
+// GET /admin/users/{id}/support — вся переписка клиента с поддержкой (для карточки пользователя в админке).
+func (s *Server) adminUserSupport(w http.ResponseWriter, r *http.Request) {
+	list, err := s.St.SupportHistory(r.Context(), pathID(r), 100)
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	writeJSON(w, 200, map[string]any{"tickets": list})
 }
 
 // NotifyStaff — уведомление сотрудникам об обращении (его же вызывает бот, когда клиент пишет в поддержку из Telegram).
@@ -171,9 +177,7 @@ func (s *Server) replyTicket(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, r, err)
 		return
 	}
-	s.alertSupport(r.Context(), t.ID, fmt.Sprintf("Ответ клиента по обращению #%d", t.ID), u.Email+": "+truncate(body, 160),
-		fmt.Sprintf("Клиент ответил по обращению #%d (%s)\n<b>%s</b>\n%s\n\nОтветьте на это сообщение (reply), чтобы ответить клиенту.",
-			t.ID, html.EscapeString(u.Email), html.EscapeString(t.Subject), html.EscapeString(truncate(body, 500))))
+	s.alertSupport(r.Context(), t.ID, "reply", fmt.Sprintf("Ответ клиента по обращению #%d", t.ID), u.Email+": "+truncate(body, 160), body)
 	s.getTicket(w, r)
 }
 
@@ -184,7 +188,10 @@ func (s *Server) closeTicket(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, r, err)
 		return
 	}
-	s.St.SetTicketStatus(r.Context(), t.ID, "closed")
+	if t.Status != "closed" {
+		s.St.CloseTicket(r.Context(), t.ID, "client")
+		s.alertSupport(r.Context(), t.ID, "closed_client", fmt.Sprintf("Клиент закрыл обращение #%d", t.ID), u.Email+": "+t.Subject, "")
+	}
 	s.getTicket(w, r)
 }
 
@@ -206,7 +213,10 @@ func (s *Server) adminTicket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	u, _ := s.St.UserByID(r.Context(), t.UserID)
-	writeJSON(w, 200, map[string]any{"ticket": t, "user": u})
+	// вся переписка этого клиента с поддержкой: остальные обращения со всеми сообщениями
+	history, _ := s.St.SupportHistory(r.Context(), t.UserID, 50)
+	plans, _ := s.St.CountOpenPlans(r.Context(), t.UserID)
+	writeJSON(w, 200, map[string]any{"ticket": t, "user": u, "history": history, "plans": plans})
 }
 
 func (s *Server) adminTicketReply(w http.ResponseWriter, r *http.Request) {
@@ -250,11 +260,22 @@ func (s *Server) adminTicketStatus(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "Некорректный статус")
 		return
 	}
-	if _, err := s.St.Ticket(r.Context(), 0, pathID(r)); err != nil {
+	t, err := s.St.Ticket(r.Context(), 0, pathID(r))
+	if err != nil {
 		s.internal(w, r, err)
 		return
 	}
-	s.St.SetTicketStatus(r.Context(), pathID(r), in.Status)
+	if in.Status == "closed" && t.Status != "closed" {
+		// закрыл сотрудник — человек узнаёт (кабинет, Telegram с кнопкой «Ответить»), в группе — отметка
+		staff := currentUser(r)
+		s.St.CloseTicket(r.Context(), t.ID, "staff")
+		s.N.Send(r.Context(), t.UserID, notify.SupportClosed(t))
+		if s.Bot != nil {
+			go s.Bot.SupportAlert(context.Background(), t.ID, "closed_staff", "", staff.Name)
+		}
+	} else {
+		s.St.SetTicketStatus(r.Context(), t.ID, in.Status)
+	}
 	s.adminTicket(w, r)
 }
 

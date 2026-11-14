@@ -244,6 +244,19 @@ func (c *Config) validate() error {
 	if c.OAuthApple == "on" && (c.AppleClientID == "" || c.AppleTeamID == "" || c.AppleKeyID == "" || c.ApplePrivateKey == "") {
 		return errors.New("OAUTH_APPLE=on требует APPLE_CLIENT_ID, APPLE_TEAM_ID, APPLE_KEY_ID и APPLE_PRIVATE_KEY(_FILE)")
 	}
+	if c.Env == "production" {
+		// cookie с флагом Secure и HSTS включаются только для https-адреса — без него сессии ушли бы открытым текстом
+		if !strings.HasPrefix(c.PublicURL, "https://") {
+			return errors.New("при APP_ENV=production PUBLIC_URL должен начинаться с https://")
+		}
+		// тестовая платёжка на боевом сервере — только как демо-счёт до запуска, иначе люди «платили» бы тестовыми картами
+		if c.Payments == PaymentsSandbox && c.LaunchMode != "waitlist" {
+			return errors.New("при APP_ENV=production тестовая платёжка (PAYMENTS=sandbox) допустима только с LAUNCH_MODE=waitlist")
+		}
+		if c.AdminPassword != "" && len([]rune(c.AdminPassword)) < 12 {
+			return errors.New("при APP_ENV=production ADMIN_PASSWORD должен быть не короче 12 символов")
+		}
+	}
 	if c.Env == "production" && c.TelegramSandbox {
 		return errors.New("тестовый Telegram недоступен при APP_ENV=production")
 	}

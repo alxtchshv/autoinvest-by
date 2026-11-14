@@ -727,6 +727,10 @@ func (b *Bot) supportText(ctx context.Context, chat int64, d supportDraft, text 
 		if d.cat == "" {
 			d.cat = "other"
 		}
+		if n, _ := b.St.SupportActivity(ctx, u.ID); n >= 10 {
+			b.send(chat, "За сутки уже 10 обращений — это предел. Дополните открытые в «Мои обращения» или напишите завтра.", kb(row(cb("📋 Мои обращения", "sl"))))
+			return
+		}
 		id, err := b.St.CreateTicketVia(ctx, u.ID, d.subj, d.cat, text, "telegram")
 		if err != nil {
 			b.Log.Error("telegram: обращение", "err", err)
@@ -756,6 +760,10 @@ func (b *Bot) addClientMessage(ctx context.Context, chat int64, u *store.User, t
 	text = strings.TrimSpace(text)
 	if r := []rune(text); len(r) > 4000 {
 		text = string(r[:4000])
+	}
+	if _, n := b.St.SupportActivity(ctx, u.ID); n >= 60 {
+		b.send(chat, "Слишком много сообщений за час — подождите немного, мы уже читаем.", nil)
+		return
 	}
 	wasClosed := t.Status == "closed"
 	if err := b.St.AddTicketMessage(ctx, t.ID, u.ID, false, text); err != nil {

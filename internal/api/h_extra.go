@@ -295,6 +295,11 @@ func (s *Server) sandboxRunSchedule(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, "Доступно только на тестовом стенде")
 		return
 	}
+	// до запуска (лист ожидания) настоящий аккаунт не должен «покупать» даже понарошку — только демо-счёт
+	if u := currentUser(r); s.waitlistMode() && !u.IsDemo() {
+		writeJSON(w, http.StatusConflict, apiErr{Error: "Пополнения откроются совсем скоро — попробуйте на демо-счёте", Code: "waitlist"})
+		return
+	}
 	p := s.loadPlan(w, r)
 	if p == nil {
 		return

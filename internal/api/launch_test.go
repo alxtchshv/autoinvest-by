@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"net/url"
 	"strconv"
 	"strings"
@@ -45,6 +46,11 @@ func TestWaitlistAndDemo(t *testing.T) {
 	}
 	if fb != 1 {
 		t.Fatalf("уведомление про идеи: %d, %+v", fb, ns.Notifications)
+	}
+	// тестовый «запуск расписания» тоже закрыт для настоящего аккаунта (только демо-счёт)
+	var se struct{ Code string }
+	if code := c.do("POST", fmt.Sprintf("/api/v1/sandbox/plans/%d/run-schedule", cr.Plan.ID), map[string]any{}, &se); code != 409 || se.Code != "waitlist" {
+		t.Fatalf("тестовая покупка в листе ожидания: %d %+v", code, se)
 	}
 	// оплаты закрыты
 	var e struct{ Code string }

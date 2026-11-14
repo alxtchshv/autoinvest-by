@@ -271,6 +271,8 @@ func (s *Server) adminKYCFile(w http.ResponseWriter, r *http.Request) {
 	}
 	s.St.Audit(r.Context(), k.UserID, currentUser(r).ID, "kyc.file_viewed", r.PathValue("kind"), clientIP(r))
 	w.Header().Set("Cache-Control", "no-store")
+	// документ клиента открывается в песочнице: если в PDF зашит скрипт, он не получит доступ к админке
+	w.Header().Set("Content-Security-Policy", "sandbox")
 	http.ServeFile(w, r, filepath.Join(s.Cfg.DataDir, "kyc", name))
 }
 

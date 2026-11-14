@@ -13,7 +13,7 @@ type Msg = { id: number; rev: number; from_bot: boolean; text: string; html: boo
 
 /** Бот присылает HTML с <b>/<i>; всё остальное показываем как текст. */
 function botHtml(t: string) {
-  const esc = t.replace(/&(?!(amp|lt|gt);)/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const esc = t.replace(/&(?!(amp|lt|gt|quot);)/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;"); // кавычки — чтобы ссылка не вышла за href
   return esc.replace(/&lt;(\/?)(b|i)&gt;/g, "<$1$2>").replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" target="_blank" rel="noreferrer">$1</a>').replace(/\n/g, "<br>");
 }
 

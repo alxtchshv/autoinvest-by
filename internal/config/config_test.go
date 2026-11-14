@@ -24,3 +24,27 @@ func TestDotEnvStripsInlineComments(t *testing.T) {
 		}
 	}
 }
+
+// Боевой сервер не поднимется с опасной настройкой: http-адрес, тестовая платёжка без листа ожидания, короткий пароль админа.
+func TestProductionGuards(t *testing.T) {
+	base := func() Config {
+		return Config{Env: "production", PublicURL: "https://autoinvest.by", Payments: PaymentsSandbox, Broker: BrokerPaper,
+			KYCDocs: "manual", MSIMode: "off", OAuthGoogle: "off", OAuthApple: "off", Market: "live", LaunchMode: "waitlist",
+			AdminPassword: "dlinnyi-parol-2026"}
+	}
+	ok := base()
+	if err := ok.validate(); err != nil {
+		t.Fatalf("правильная боевая настройка не прошла: %v", err)
+	}
+	for name, bad := range map[string]func(*Config){
+		"http":         func(c *Config) { c.PublicURL = "http://autoinvest.by" },
+		"sandbox open": func(c *Config) { c.LaunchMode = "open" },
+		"short admin":  func(c *Config) { c.AdminPassword = "short-pass1" },
+	} {
+		c := base()
+		bad(&c)
+		if c.validate() == nil {
+			t.Errorf("%s: опасная настройка принята", name)
+		}
+	}
+}

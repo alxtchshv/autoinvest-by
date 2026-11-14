@@ -171,6 +171,15 @@ func (s *Store) SupportHistory(ctx context.Context, userID int64, limit int) ([]
 	return list, nil
 }
 
+// SupportActivity — сколько обращений человек создал за сутки и сколько сообщений написал за час
+// (общий лимит для сайта и Telegram: группа поддержки не должна заваливаться спамом).
+func (s *Store) SupportActivity(ctx context.Context, userID int64) (tickets24h, messages1h int) {
+	now := Now()
+	s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM tickets WHERE user_id=? AND created_at>?`, userID, now-86400).Scan(&tickets24h)
+	s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM ticket_messages WHERE author_id=? AND is_staff=0 AND created_at>?`, userID, now-3600).Scan(&messages1h)
+	return
+}
+
 // TicketCounts — сколько всего обращений у человека и сколько из них не закрыто.
 func (s *Store) TicketCounts(ctx context.Context, userID int64) (total, open int) {
 	s.DB.QueryRowContext(ctx, `SELECT COUNT(*), COALESCE(SUM(status!='closed'),0) FROM tickets WHERE user_id=?`, userID).Scan(&total, &open)

@@ -33,20 +33,22 @@ const (
 )
 
 type Server struct {
-	Cfg     *config.Config
-	St      *store.Store
-	DB      *sql.DB
-	Hub     *market.Hub
-	En      *engine.Engine
-	Pay     payments.Provider
-	Sandbox *payments.Sandbox
-	N       *notify.Notifier
-	Bot     *telegram.Bot
-	TG      *telegram.Sandbox // тестовый Telegram (только при разработке)
-	Log     *slog.Logger
-	Static  fs.FS
-	Version string
-	Started time.Time
+	// RatePerIP — запросов к API в секунду с одного IP (0 — по умолчанию 10; тесты поднимают)
+	RatePerIP float64
+	Cfg       *config.Config
+	St        *store.Store
+	DB        *sql.DB
+	Hub       *market.Hub
+	En        *engine.Engine
+	Pay       payments.Provider
+	Sandbox   *payments.Sandbox
+	N         *notify.Notifier
+	Bot       *telegram.Bot
+	TG        *telegram.Sandbox // тестовый Telegram (только при разработке)
+	Log       *slog.Logger
+	Static    fs.FS
+	Version   string
+	Started   time.Time
 
 	limiter *limiter
 	statsMu sync.Mutex
@@ -77,7 +79,7 @@ func (s *Server) Handler() http.Handler {
 	s.stats = map[string]statsEntry{}
 	mux := http.NewServeMux()
 	s.routes(mux)
-	return s.recoverer(s.securityHeaders(s.logRequests(s.withSession(s.csrf(mux)))))
+	return s.recoverer(s.securityHeaders(s.throttle(s.logRequests(s.withSession(s.csrf(mux))))))
 }
 
 func (s *Server) routes(m *http.ServeMux) {

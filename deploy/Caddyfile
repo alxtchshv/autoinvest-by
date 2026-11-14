@@ -1,6 +1,10 @@
 # Замените домен. Caddy сам получит сертификат Let's Encrypt.
 autoinvest.by {
 	encode zstd gzip
+	# запросы больше 25 МБ обрываются ещё до приложения (самое большое — фото документа до 8 МБ)
+	request_body {
+		max_size 25MB
+	}
 	reverse_proxy app:8080 {
 		# SSE: без буферизации, чтобы котировки шли в реальном времени
 		flush_interval -1

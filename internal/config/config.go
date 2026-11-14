@@ -33,6 +33,7 @@ type Config struct {
 	Addr          string
 	PublicURL     string // внешний адрес сайта, например https://autoinvest.by
 	DataDir       string
+	DataKey       string // base64 32 байт: ключ шифрования полей в базе (на сервере обязателен)
 	Env           string // development | production
 	SecureCookies bool
 
@@ -109,6 +110,7 @@ func Load() (*Config, error) {
 		Addr:             env("ADDR", ":8080"),
 		PublicURL:        strings.TrimRight(env("PUBLIC_URL", "http://localhost:8080"), "/"),
 		DataDir:          env("DATA_DIR", "data"),
+		DataKey:          env("DATA_KEY", ""),
 		Env:              env("APP_ENV", "development"),
 		Payments:         env("PAYMENTS", PaymentsSandbox),
 		BePaidShopID:     env("BEPAID_SHOP_ID", ""),
@@ -252,6 +254,10 @@ func (c *Config) validate() error {
 		// тестовая платёжка на боевом сервере — только как демо-счёт до запуска, иначе люди «платили» бы тестовыми картами
 		if c.Payments == PaymentsSandbox && c.LaunchMode != "waitlist" {
 			return errors.New("при APP_ENV=production тестовая платёжка (PAYMENTS=sandbox) допустима только с LAUNCH_MODE=waitlist")
+		}
+		// без ключа шифрования секреты 2FA, токены карт и паспортные данные лежали бы в базе открытым текстом
+		if c.DataKey == "" {
+			return errors.New("при APP_ENV=production нужен DATA_KEY (openssl rand -base64 32) — храните его в менеджере паролей: без него зашифрованные данные не прочитать")
 		}
 		if c.AdminPassword != "" && len([]rune(c.AdminPassword)) < 12 {
 			return errors.New("при APP_ENV=production ADMIN_PASSWORD должен быть не короче 12 символов")

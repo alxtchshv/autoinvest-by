@@ -1110,18 +1110,35 @@ func (b *Bot) user(ctx context.Context, chat int64) (*store.User, bool) {
 	return u, true
 }
 
+// maskEmail — a***@gmail.com: человек узнает свой второй аккаунт, посторонний — не узнает почту целиком.
+func maskEmail(e string) string {
+	local, domain, ok := strings.Cut(e, "@")
+	if !ok || local == "" {
+		return "***"
+	}
+	return string([]rune(local)[:1]) + "***@" + domain
+}
+
 func (b *Bot) bind(ctx context.Context, chat int64, username, code string) {
 	uid, err := b.St.UseTelegramLink(ctx, code)
 	if err != nil {
 		b.send(chat, "Ссылка устарела. Нажмите «Подключить Telegram» на сайте ещё раз.", nil)
 		return
 	}
-	// один чат — один аккаунт
-	b.St.DB.ExecContext(ctx, `UPDATE users SET telegram_chat_id=NULL WHERE telegram_chat_id=? AND id!=?`, chat, uid)
+	// один Telegram — один аккаунт: если он уже подключён к другому (в том числе заблокированному), не переносим молча
+	if otherID, otherEmail := b.St.TelegramOwner(ctx, chat); otherID != 0 && otherID != uid {
+		b.send(chat, "Этот Telegram уже подключён к другому аккаунту AutoInvest ("+escape(maskEmail(otherEmail))+").\n"+
+			"Один Telegram — один аккаунт. Чтобы подключить его сюда, сначала отключите его там: /stop.", nil)
+		return
+	}
 	if len(username) > 64 {
 		username = username[:64]
 	}
-	b.St.UpdateUserFields(ctx, uid, map[string]any{"telegram_chat_id": chat, "telegram_username": username, "notify_telegram": true})
+	if err := b.St.UpdateUserFields(ctx, uid, map[string]any{"telegram_chat_id": chat, "telegram_username": username, "notify_telegram": true}); err != nil {
+		b.Log.Warn("telegram: привязка", "err", err)
+		b.send(chat, "Не получилось подключить Telegram. Нажмите «Подключить Telegram» на сайте ещё раз.", nil)
+		return
+	}
 	// сообщения до привязки (/start) тоже относим к этому пользователю
 	b.St.DB.ExecContext(ctx, `UPDATE telegram_log SET user_id=? WHERE chat_id=? AND user_id IS NULL AND created_at>?`, uid, chat, store.Now()-600)
 	b.St.Audit(ctx, uid, uid, "telegram.link", "@"+username, "")

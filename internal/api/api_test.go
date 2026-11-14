@@ -50,7 +50,7 @@ func newServer(t *testing.T) (*httptest.Server, *Server) {
 	sb := payments.NewSandbox(cfg.PublicURL)
 	n := notify.New(st, notify.NewMailer("", 0, "", "", "", log), cfg.PublicURL, log)
 	en := &engine.Engine{St: st, DB: d, Hub: hub, Pay: sb, Broker: engine.PaperBroker{Hub: hub}, N: n, Cfg: cfg, Log: log}
-	s := &Server{Cfg: cfg, St: st, DB: d, Hub: hub, En: en, Pay: sb, Sandbox: sb, N: n, Log: log,
+	s := &Server{RatePerIP: 100000, Cfg: cfg, St: st, DB: d, Hub: hub, En: en, Pay: sb, Sandbox: sb, N: n, Log: log,
 		Static: fstest.MapFS{"index.html": {Data: []byte("<html></html>")}}, Version: "test", Started: time.Now()}
 	srv := httptest.NewServer(s.Handler())
 	t.Cleanup(func() {

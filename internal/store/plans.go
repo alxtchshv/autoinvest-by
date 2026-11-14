@@ -33,6 +33,7 @@ func scanCard(r scanner) (*Card, error) {
 	var c Card
 	err := r.Scan(&c.ID, &c.UserID, &c.Provider, &c.Token, &c.Brand, &c.Last4, &c.ExpMonth, &c.ExpYear, &c.Holder, &c.Issuer, &c.BIN, &c.IsDefault, &c.Status, &c.CreatedAt)
 	c.Mask = CardMask(c.BIN, c.Last4)
+	c.Token = unseal(c.Token) // токен платёжки хранится зашифрованным
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -178,8 +179,18 @@ func (s *Store) FinishBinding(ctx context.Context, ref string, card *Card, errMs
 		return nil, tx.Commit()
 	}
 	// одна и та же карта (тот же токен) не дублируется
+	// токены в базе зашифрованы (каждый раз по-разному) — сравниваем расшифрованные
 	var existing sql.NullInt64
-	tx.QueryRowContext(ctx, `SELECT id FROM cards WHERE user_id=? AND token=? AND status='active'`, uid, card.Token).Scan(&existing)
+	if rows, err := tx.QueryContext(ctx, `SELECT id, token FROM cards WHERE user_id=? AND status='active'`, uid); err == nil {
+		for rows.Next() {
+			var cid int64
+			var tok string
+			if rows.Scan(&cid, &tok) == nil && unseal(tok) == card.Token {
+				existing = sql.NullInt64{Int64: cid, Valid: true}
+			}
+		}
+		rows.Close()
+	}
 	var id int64
 	if existing.Valid {
 		id = existing.Int64
@@ -187,7 +198,7 @@ func (s *Store) FinishBinding(ctx context.Context, ref string, card *Card, errMs
 		var n int
 		tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM cards WHERE user_id=? AND status='active'`, uid).Scan(&n)
 		res, err := tx.ExecContext(ctx, `INSERT INTO cards(user_id, provider, token, brand, last4, exp_month, exp_year, holder, issuer, bin, is_default, created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`,
-			uid, card.Provider, card.Token, card.Brand, onlyDigits(card.Last4, 4), card.ExpMonth, card.ExpYear, card.Holder, card.Issuer, onlyDigits(card.BIN, 6), n == 0, Now())
+			uid, card.Provider, seal(card.Token), card.Brand, onlyDigits(card.Last4, 4), card.ExpMonth, card.ExpYear, card.Holder, card.Issuer, onlyDigits(card.BIN, 6), n == 0, Now())
 		if err != nil {
 			return nil, err
 		}

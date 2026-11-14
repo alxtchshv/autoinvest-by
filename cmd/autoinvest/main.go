@@ -8,6 +8,8 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -15,6 +17,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -58,6 +61,13 @@ func main() {
 	}
 	defer d.Close()
 	st := store.New(d)
+	if err := loadDataKey(cfg); err != nil {
+		log.Error("ключ шифрования", "err", err)
+		os.Exit(1)
+	}
+	if err := st.EncryptLegacy(context.Background()); err != nil {
+		log.Error("шифрование старых данных", "err", err)
+	}
 
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
@@ -91,6 +101,9 @@ func main() {
 		}
 	}
 
+	if dups := st.BackfillEmailCanon(context.Background()); len(dups) > 0 {
+		log.Warn("один ящик — несколько старых аккаунтов (оставлены как есть, разберите в админке)", "emails", dups)
+	}
 	if cfg.AdminEmail != "" && cfg.AdminPassword != "" {
 		// из переменных окружения администратор только создаётся; существующий аккаунт не повышается,
 		// иначе любой, кто первым зарегистрировал этот email, стал бы админом
@@ -295,4 +308,30 @@ func seedDemo(ctx context.Context, cfg *config.Config, st *store.Store, en *engi
 	fmt.Println("Демо-пользователь создан:", email, "/", pass)
 	_ = cfg
 	return nil
+}
+
+// loadDataKey — ключ шифрования полей базы: DATA_KEY из окружения (на сервере обязателен),
+// при разработке — файл data.key в DATA_DIR, создаётся сам. Ключ в базу не попадает.
+func loadDataKey(cfg *config.Config) error {
+	raw := strings.TrimSpace(cfg.DataKey)
+	if raw == "" {
+		path := filepath.Join(cfg.DataDir, "data.key")
+		if b, err := os.ReadFile(path); err == nil {
+			raw = strings.TrimSpace(string(b))
+		} else {
+			k := make([]byte, 32)
+			if _, err := rand.Read(k); err != nil {
+				return err
+			}
+			raw = base64.StdEncoding.EncodeToString(k)
+			if err := os.WriteFile(path, []byte(raw+"\n"), 0o600); err != nil {
+				return err
+			}
+		}
+	}
+	k, err := base64.StdEncoding.DecodeString(raw)
+	if err != nil {
+		return errors.New("DATA_KEY: не base64 (сгенерируйте: openssl rand -base64 32)")
+	}
+	return store.SetDataKey(k)
 }

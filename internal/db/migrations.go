@@ -361,4 +361,12 @@ CREATE TABLE visits (
 	// откуда пришло обращение (сайт или Telegram) и кто закрыл — для поддержки
 	`ALTER TABLE tickets ADD COLUMN source TEXT NOT NULL DEFAULT 'web';
 ALTER TABLE tickets ADD COLUMN closed_by TEXT NOT NULL DEFAULT '';`,
+	// один человек — один аккаунт: почта без точек и «+метки» (Gmail), один Telegram — один аккаунт
+	`ALTER TABLE users ADD COLUMN email_canon TEXT;
+CREATE UNIQUE INDEX users_email_canon ON users(email_canon) WHERE email_canon IS NOT NULL;
+UPDATE users SET telegram_chat_id=NULL WHERE telegram_chat_id IS NOT NULL
+	AND id NOT IN (SELECT MIN(id) FROM users WHERE telegram_chat_id IS NOT NULL GROUP BY telegram_chat_id);
+CREATE UNIQUE INDEX users_telegram ON users(telegram_chat_id) WHERE telegram_chat_id IS NOT NULL;`,
+	// шифрование KYC: идентификационный номер — отпечаток (уникальность) + шифр в отдельной колонке
+	`ALTER TABLE kyc ADD COLUMN personal_number_enc TEXT NOT NULL DEFAULT '';`,
 }

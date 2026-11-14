@@ -30,7 +30,7 @@ func TestProductionGuards(t *testing.T) {
 	base := func() Config {
 		return Config{Env: "production", PublicURL: "https://autoinvest.by", Payments: PaymentsSandbox, Broker: BrokerPaper,
 			KYCDocs: "manual", MSIMode: "off", OAuthGoogle: "off", OAuthApple: "off", Market: "live", LaunchMode: "waitlist",
-			AdminPassword: "dlinnyi-parol-2026"}
+			AdminPassword: "dlinnyi-parol-2026", DataKey: "x"}
 	}
 	ok := base()
 	if err := ok.validate(); err != nil {

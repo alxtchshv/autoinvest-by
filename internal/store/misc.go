@@ -288,16 +288,21 @@ type KYC struct {
 }
 
 const kycSelect = `SELECT k.user_id, u.email, k.last_name, k.first_name, k.middle_name, k.birth_date, k.personal_number, k.doc_number, k.doc_issued_at,
-	k.citizenship, k.address, k.doc_file, k.selfie_file, k.status, k.reject_reason, k.submitted_at, k.reviewed_at, k.method, k.provider_ref FROM kyc k JOIN users u ON u.id=k.user_id`
+	k.citizenship, k.address, k.doc_file, k.selfie_file, k.status, k.reject_reason, k.submitted_at, k.reviewed_at, k.method, k.provider_ref, k.personal_number_enc FROM kyc k JOIN users u ON u.id=k.user_id`
 
 func scanKYC(r scanner) (*KYC, error) {
 	var k KYC
 	var rev sql.NullInt64
+	var pnEnc string
 	err := r.Scan(&k.UserID, &k.UserEmail, &k.LastName, &k.FirstName, &k.MiddleName, &k.BirthDate, &k.PersonalNumber, &k.DocNumber, &k.DocIssuedAt,
-		&k.Citizenship, &k.Address, &k.DocFile, &k.SelfieFile, &k.Status, &k.RejectReason, &k.SubmittedAt, &rev, &k.Method, &k.ProviderRef)
+		&k.Citizenship, &k.Address, &k.DocFile, &k.SelfieFile, &k.Status, &k.RejectReason, &k.SubmittedAt, &rev, &k.Method, &k.ProviderRef, &pnEnc)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
+	if strings.HasPrefix(k.PersonalNumber, "h:") {
+		k.PersonalNumber = unseal(pnEnc)
+	}
+	k.DocNumber, k.Address, k.BirthDate = unseal(k.DocNumber), unseal(k.Address), unseal(k.BirthDate)
 	k.ReviewedAt = nullInt(rev)
 	k.HasDoc, k.HasSelfie = k.DocFile != "", k.SelfieFile != ""
 	return &k, err
@@ -324,21 +329,31 @@ func (s *Store) KYCList(ctx context.Context, status string, limit int) ([]KYC, e
 	return out, rows.Err()
 }
 
+// sealKYC — паспортные данные в базу: номер → отпечаток (уникальность) + шифр, документ, адрес и дата рождения — шифр.
+func sealKYC(k *KYC) (pnEnc string) {
+	if pn := strings.ToUpper(strings.TrimSpace(k.PersonalNumber)); pn != "" && !strings.HasPrefix(pn, "PENDING-") && !strings.HasPrefix(k.PersonalNumber, "h:") {
+		k.PersonalNumber, pnEnc = blindIndex("pn", pn), seal(pn)
+	}
+	k.DocNumber, k.Address, k.BirthDate = seal(k.DocNumber), seal(k.Address), seal(k.BirthDate)
+	return pnEnc
+}
+
 func (s *Store) SubmitKYC(ctx context.Context, k KYC) error {
+	pnEnc := sealKYC(&k)
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	_, err = tx.ExecContext(ctx, `INSERT INTO kyc(user_id, last_name, first_name, middle_name, birth_date, personal_number, doc_number, doc_issued_at, citizenship, address, doc_file, selfie_file, status, reject_reason, submitted_at)
-		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,'pending','',?)
+	_, err = tx.ExecContext(ctx, `INSERT INTO kyc(user_id, last_name, first_name, middle_name, birth_date, personal_number, doc_number, doc_issued_at, citizenship, address, doc_file, selfie_file, status, reject_reason, submitted_at, personal_number_enc)
+		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,'pending','',?,?)
 		ON CONFLICT(user_id) DO UPDATE SET last_name=excluded.last_name, first_name=excluded.first_name, middle_name=excluded.middle_name,
-		birth_date=excluded.birth_date, personal_number=excluded.personal_number, doc_number=excluded.doc_number, doc_issued_at=excluded.doc_issued_at,
+		birth_date=excluded.birth_date, personal_number=excluded.personal_number, personal_number_enc=excluded.personal_number_enc, doc_number=excluded.doc_number, doc_issued_at=excluded.doc_issued_at,
 		citizenship=excluded.citizenship, address=excluded.address,
 		doc_file=CASE WHEN excluded.doc_file!='' THEN excluded.doc_file ELSE kyc.doc_file END,
 		selfie_file=CASE WHEN excluded.selfie_file!='' THEN excluded.selfie_file ELSE kyc.selfie_file END,
 		status='pending', reject_reason='', submitted_at=excluded.submitted_at, reviewed_at=NULL`,
-		k.UserID, k.LastName, k.FirstName, k.MiddleName, k.BirthDate, k.PersonalNumber, k.DocNumber, k.DocIssuedAt, k.Citizenship, k.Address, k.DocFile, k.SelfieFile, Now())
+		k.UserID, k.LastName, k.FirstName, k.MiddleName, k.BirthDate, k.PersonalNumber, k.DocNumber, k.DocIssuedAt, k.Citizenship, k.Address, k.DocFile, k.SelfieFile, Now(), pnEnc)
 	if err != nil {
 		return err
 	}
@@ -355,6 +370,7 @@ func (s *Store) SetKYCResult(ctx context.Context, k KYC) error {
 	if k.PersonalNumber == "" {
 		k.PersonalNumber = fmt.Sprintf("pending-%d", k.UserID)
 	}
+	pnEnc := sealKYC(&k)
 	if k.Citizenship == "" {
 		k.Citizenship = "BY"
 	}
@@ -368,14 +384,15 @@ func (s *Store) SetKYCResult(ctx context.Context, k KYC) error {
 		return err
 	}
 	defer tx.Rollback()
-	_, err = tx.ExecContext(ctx, `INSERT INTO kyc(user_id, last_name, first_name, middle_name, birth_date, personal_number, doc_number, doc_issued_at, citizenship, address, doc_file, selfie_file, status, reject_reason, submitted_at, reviewed_at, method, provider_ref)
-		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+	_, err = tx.ExecContext(ctx, `INSERT INTO kyc(user_id, last_name, first_name, middle_name, birth_date, personal_number, doc_number, doc_issued_at, citizenship, address, doc_file, selfie_file, status, reject_reason, submitted_at, reviewed_at, method, provider_ref, personal_number_enc)
+		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 		ON CONFLICT(user_id) DO UPDATE SET
 		last_name=CASE WHEN excluded.last_name!='' THEN excluded.last_name ELSE kyc.last_name END,
 		first_name=CASE WHEN excluded.first_name!='' THEN excluded.first_name ELSE kyc.first_name END,
 		middle_name=CASE WHEN excluded.middle_name!='' THEN excluded.middle_name ELSE kyc.middle_name END,
 		birth_date=CASE WHEN excluded.birth_date!='' THEN excluded.birth_date ELSE kyc.birth_date END,
 		personal_number=CASE WHEN excluded.personal_number NOT LIKE 'pending-%' OR kyc.personal_number LIKE 'pending-%' THEN excluded.personal_number ELSE kyc.personal_number END,
+		personal_number_enc=CASE WHEN excluded.personal_number NOT LIKE 'pending-%' OR kyc.personal_number LIKE 'pending-%' THEN excluded.personal_number_enc ELSE kyc.personal_number_enc END,
 		doc_number=CASE WHEN excluded.doc_number!='' THEN excluded.doc_number ELSE kyc.doc_number END,
 		doc_issued_at=CASE WHEN excluded.doc_issued_at!='' THEN excluded.doc_issued_at ELSE kyc.doc_issued_at END,
 		address=CASE WHEN excluded.address!='' THEN excluded.address ELSE kyc.address END,
@@ -386,7 +403,7 @@ func (s *Store) SetKYCResult(ctx context.Context, k KYC) error {
 		reviewed_at=excluded.reviewed_at, method=excluded.method,
 		provider_ref=CASE WHEN excluded.provider_ref!='' THEN excluded.provider_ref ELSE kyc.provider_ref END`,
 		k.UserID, k.LastName, k.FirstName, k.MiddleName, k.BirthDate, k.PersonalNumber, k.DocNumber, k.DocIssuedAt, k.Citizenship, k.Address,
-		k.DocFile, k.SelfieFile, k.Status, k.RejectReason, now, reviewed, k.Method, k.ProviderRef)
+		k.DocFile, k.SelfieFile, k.Status, k.RejectReason, now, reviewed, k.Method, k.ProviderRef, pnEnc)
 	if err != nil {
 		return err
 	}
@@ -422,13 +439,13 @@ func (s *Store) ReviewKYC(ctx context.Context, userID, reviewer int64, approve b
 
 func (s *Store) CreateTelegramLink(ctx context.Context, userID int64, code string, ttl int64) error {
 	s.DB.ExecContext(ctx, `DELETE FROM telegram_links WHERE user_id=? OR expires_at<?`, userID, Now())
-	_, err := s.DB.ExecContext(ctx, `INSERT INTO telegram_links(code, user_id, expires_at) VALUES(?,?,?)`, code, userID, Now()+ttl)
+	_, err := s.DB.ExecContext(ctx, `INSERT INTO telegram_links(code, user_id, expires_at) VALUES(?,?,?)`, sha(code), userID, Now()+ttl) // в базе — только хэш
 	return err
 }
 
 func (s *Store) UseTelegramLink(ctx context.Context, code string) (int64, error) {
 	var uid int64
-	err := s.DB.QueryRowContext(ctx, `DELETE FROM telegram_links WHERE code=? AND expires_at>? RETURNING user_id`, code, Now()).Scan(&uid)
+	err := s.DB.QueryRowContext(ctx, `DELETE FROM telegram_links WHERE code=? AND expires_at>? RETURNING user_id`, sha(code), Now()).Scan(&uid)
 	if errors.Is(err, sql.ErrNoRows) {
 		return 0, ErrNotFound
 	}

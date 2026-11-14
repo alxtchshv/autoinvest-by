@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -105,7 +106,7 @@ func (s *Server) payReturn(w http.ResponseWriter, r *http.Request) {
 	if b, err := s.St.GetBinding(r.Context(), ref); err == nil && b.Status == "pending" && b.ProviderRef != "" {
 		s.pollBinding(r, b)
 	}
-	http.Redirect(w, r, "/app/cards?bind="+ref, http.StatusSeeOther)
+	http.Redirect(w, r, "/app/cards?bind="+url.QueryEscape(ref), http.StatusSeeOther)
 }
 
 func (s *Server) bepaidWebhook(w http.ResponseWriter, r *http.Request) {

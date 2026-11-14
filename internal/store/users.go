@@ -115,6 +115,7 @@ func scanUser(r scanner) (*User, error) {
 	u.PhoneVerified = phoneVerified.Valid && u.Phone != ""
 	u.HasPassword = u.PasswordHash != ""
 	u.DemoOf, u.WaitlistAt = nullInt(demoOf), nullInt(waitlist)
+	u.TOTPSecret = unseal(u.TOTPSecret) // в базе — шифр (ключ DATA_KEY вне базы)
 	return &u, nil
 }
 
@@ -122,12 +123,68 @@ func (s *Store) UserByID(ctx context.Context, id int64) (*User, error) {
 	return scanUser(s.DB.QueryRowContext(ctx, `SELECT `+userCols+` FROM users WHERE id=?`, id))
 }
 
+// UserByEmail — по почте; a.b@gmail.com, ab@gmail.com и ab+1@gmail.com — один и тот же ящик и один аккаунт.
 func (s *Store) UserByEmail(ctx context.Context, email string) (*User, error) {
-	return scanUser(s.DB.QueryRowContext(ctx, `SELECT `+userCols+` FROM users WHERE email=? AND status!='deleted'`, strings.TrimSpace(email)))
+	email = strings.TrimSpace(email)
+	return scanUser(s.DB.QueryRowContext(ctx, `SELECT `+userCols+` FROM users WHERE (email=? OR email_canon=?) AND status!='deleted'
+		ORDER BY email=? DESC LIMIT 1`, email, CanonicalEmail(email), email))
+}
+
+// CanonicalEmail — адрес ящика без вариантов написания: регистр, «+метка» (почти все почтовые сервисы
+// доставляют ab+x@ в ab@), точки в Gmail (a.b@gmail.com = ab@gmail.com), googlemail.com = gmail.com.
+func CanonicalEmail(e string) string {
+	e = strings.ToLower(strings.TrimSpace(e))
+	local, domain, ok := strings.Cut(e, "@")
+	if !ok || local == "" || domain == "" {
+		return e
+	}
+	if i := strings.IndexByte(local, '+'); i > 0 {
+		local = local[:i]
+	}
+	if domain == "googlemail.com" {
+		domain = "gmail.com"
+	}
+	if domain == "gmail.com" {
+		local = strings.ReplaceAll(local, ".", "")
+	}
+	return local + "@" + domain
+}
+
+// BackfillEmailCanon — заполнить нормализованную почту у старых аккаунтов (один раз после обновления).
+// Если два старых аккаунта — один ящик, второму поле не ставится (в лог), чтобы не потерять данные.
+func (s *Store) BackfillEmailCanon(ctx context.Context) (dups []string) {
+	rows, err := s.DB.QueryContext(ctx, `SELECT id, email FROM users WHERE email_canon IS NULL AND status!='deleted' AND role!='demo' ORDER BY id`)
+	if err != nil {
+		return nil
+	}
+	type row struct {
+		id    int64
+		email string
+	}
+	var list []row
+	for rows.Next() {
+		var r row
+		if rows.Scan(&r.id, &r.email) == nil {
+			list = append(list, r)
+		}
+	}
+	rows.Close()
+	for _, r := range list {
+		if _, err := s.DB.ExecContext(ctx, `UPDATE users SET email_canon=? WHERE id=?`, CanonicalEmail(r.email), r.id); err != nil {
+			dups = append(dups, r.email)
+		}
+	}
+	return dups
 }
 
 func (s *Store) UserByReferral(ctx context.Context, code string) (*User, error) {
 	return scanUser(s.DB.QueryRowContext(ctx, `SELECT `+userCols+` FROM users WHERE referral_code=? AND status='active'`, strings.ToUpper(strings.TrimSpace(code))))
+}
+
+// TelegramOwner — чей это Telegram (любой статус, кроме удалённых: у них привязка снята). 0 — ничей.
+func (s *Store) TelegramOwner(ctx context.Context, chatID int64) (id int64, email string) {
+	s.DB.QueryRowContext(ctx, `SELECT id, email FROM users WHERE telegram_chat_id=? AND status!='deleted'`, chatID).Scan(&id, &email)
+	return
 }
 
 func (s *Store) UserByTelegram(ctx context.Context, chatID int64) (*User, error) {
@@ -149,10 +206,14 @@ func (s *Store) CreateUser(ctx context.Context, n NewUser) (*User, error) {
 	if n.EmailVerified {
 		verified = now
 	}
+	var canon any = CanonicalEmail(n.Email)
+	if n.Role == "demo" {
+		canon = nil // демо-счёт — теневой пользователь, не «второй аккаунт»
+	}
 	for i := 0; i < 5; i++ {
 		code := auth.RandomCode(8, "")
-		res, err := s.DB.ExecContext(ctx, `INSERT INTO users(email, email_verified_at, phone, name, password_hash, role, referral_code, referred_by, created_at, updated_at)
-			VALUES(?,?,?,?,?,?,?,?,?,?)`, strings.TrimSpace(n.Email), verified, n.Phone, n.Name, n.PasswordHash, n.Role, code, n.ReferredBy, now, now)
+		res, err := s.DB.ExecContext(ctx, `INSERT INTO users(email, email_canon, email_verified_at, phone, name, password_hash, role, referral_code, referred_by, created_at, updated_at)
+			VALUES(?,?,?,?,?,?,?,?,?,?,?)`, strings.TrimSpace(n.Email), canon, verified, n.Phone, n.Name, n.PasswordHash, n.Role, code, n.ReferredBy, now, now)
 		if err != nil {
 			if strings.Contains(err.Error(), "users.referral_code") {
 				continue
@@ -181,6 +242,11 @@ func (s *Store) UpdateUserFields(ctx context.Context, id int64, fields map[strin
 	for k, v := range fields {
 		if !allowed[k] {
 			return errors.New("недопустимое поле " + k)
+		}
+		if k == "totp_secret" {
+			if str, ok := v.(string); ok {
+				v = seal(str)
+			}
 		}
 		sets = append(sets, k+"=?")
 		args = append(args, v)
